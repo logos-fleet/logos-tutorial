@@ -318,6 +318,12 @@ nix build .#include
 # result/. Build it from `nix develop` without re-running any generator.
 nix build .#generate
 
+# Build the Bare module artifact: the impl (or Rust core) exporting the
+# module-impl C ABI with lp_* left undefined and no Qt in it at all. This is
+# what an embedded framework or a Wasm host is cut from. Available for
+# `interface: "cdylib"` and core `interface: "universal"` modules.
+nix build .#bare
+
 # Enter the dev shell for manual CMake builds (see: https://nix.dev/tutorials/first-steps/dev-environment)
 # The shell provides cmake, ninja, Qt, the Logos SDK, and all build dependencies.
 nix develop
@@ -334,6 +340,25 @@ result/
     ├── my_module_api.h           # Generated type-safe wrapper header
     └── my_module_api.cpp         # Generated wrapper implementation
 ```
+
+`nix build .#bare` produces a different artifact next to that one:
+
+```
+result/
+└── lib/
+    └── my_module_bare.so         # (or .dylib on macOS)
+```
+
+The **Bare module** is the protocol-free shape of the same module: it exports
+the common module-impl C ABI (`logos_module_dispatch`,
+`logos_module_get_methods`, `logos_module_set_context`,
+`logos_module_set_emit_callback`, `logos_module_accept_token`,
+`logos_module_get_protocol_version`, `logos_module_string_free`) and leaves the
+logos-protocol consumer ABI (`lp_*`) **undefined** for the host image to supply
+at load time — no Qt, no generated Qt-plugin glue, no logos-protocol archive.
+The build gates it: if the linker disagrees, the derivation fails and names the
+offending symbol or library. `type: ui_qml` backends and hand-written Qt modules
+have no protocol-free form and expose no `bare` output.
 
 ---
 
