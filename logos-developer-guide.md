@@ -357,6 +357,12 @@ nix build .#include
 # result/. Build it from `nix develop` without re-running any generator.
 nix build .#generate
 
+# Build the Bare module artifact: the impl (or Rust core) exporting the
+# module-impl C ABI with lp_* left undefined and no Qt in it at all. This is
+# what an embedded framework or a Wasm host is cut from. Available for
+# `interface: "cdylib"` and core `interface: "universal"` modules.
+nix build .#bare
+
 # Enter the dev shell for manual CMake builds (see: https://nix.dev/tutorials/first-steps/dev-environment)
 # The shell provides cmake, ninja, Qt, the Logos SDK, and all build dependencies.
 nix develop
@@ -373,6 +379,33 @@ result/
     ├── my_module_api.h           # Generated type-safe wrapper header
     └── my_module_api.cpp         # Generated wrapper implementation
 ```
+
+`nix build .#bare` produces a different artifact next to that one:
+
+```
+result/
+└── lib/
+    └── my_module_bare.so         # (or .dylib on macOS)
+```
+
+The **Bare module** is the protocol-free shape of the same module: it exports
+the whole common module-impl C ABI — every symbol logos-protocol declares in
+`cpp/logos_module_impl.h`, which at protocol 0.9 is `logos_module_dispatch`,
+`logos_module_get_methods`, `logos_module_set_context`,
+`logos_module_set_emit_callback`, `logos_module_set_call_caller`,
+`logos_module_accept_token`, `logos_module_accept_inbound_token`,
+`logos_module_grant_host_services`, `logos_module_get_protocol_version`,
+`logos_module_about_to_unload`, `logos_module_set_unload_done_callback` and
+`logos_module_string_free` — and leaves the logos-protocol consumer ABI (`lp_*`)
+**undefined** for the host image to supply at load time: no Qt, no generated
+Qt-plugin glue, no logos-protocol archive.
+
+The build gates it: if the linker disagrees, the derivation fails and names the
+offending symbol or library. The gate reads the required export list from
+logos-protocol's published `module-impl-abi/exports.txt` rather than keeping its
+own copy, so it tracks the ABI as it grows — you do not need to memorise the
+list above. `type: ui_qml` backends and hand-written Qt (`interface: legacy`)
+modules have no protocol-free form and expose no `bare` output at all.
 
 ---
 
