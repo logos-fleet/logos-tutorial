@@ -363,6 +363,13 @@ nix build .#generate
 # `interface: "cdylib"` and core `interface: "universal"` modules.
 nix build .#bare
 
+# The same artifact for a phone. A Bare module carries no Qt, so it is the one
+# module output that cross-compiles: arm64 iOS (device and simulator) and
+# arm64-v8a Android, API 28.
+nix build .#packages.aarch64-ios.bare
+nix build .#packages.aarch64-ios-simulator.bare
+nix build .#packages.aarch64-android.bare
+
 # Enter the dev shell for manual CMake builds (see: https://nix.dev/tutorials/first-steps/dev-environment)
 # The shell provides cmake, ninja, Qt, the Logos SDK, and all build dependencies.
 nix develop
@@ -426,10 +433,25 @@ also records `NEEDED liblogos_protocol.so`, which is the only way bionic lets a
 `dlopen`'d image reach an app library's symbols — `lp_*` stays undefined either
 way.
 
-Two limits: a `codegen.rust` or Go core does not cross (its compiled archive is
-staged for the build platform) and is refused by name, and
-`packages.aarch64-android` is built from logos-nix's canonical Android build
-platform, so on a Mac use
+Android gets one gate more than the desktop build: a `DT_NEEDED` soname the app
+does not ship and Android does not guarantee fails the build rather than the
+phone (where it arrives as an `UnsatisfiedLinkError` naming one soname and none
+of the reason). Link such a library into the module statically, or ship it
+beside the `.so`.
+
+A `codegen.rust` core crosses like the C++ one — the crate is recompiled for the
+target and staged over the build-platform archive `generate` left in `lib/`, so
+nothing about authoring changes. What does not cross is refused by name at eval
+rather than left to the linker:
+
+- a module declaring `nix.external_libraries`. Those images come from their own
+  flakes, which have to publish a package for the target;
+- a Go core, for the same reason with no cross toolchain wired in.
+
+Which machine builds which key is a separate matter. The iOS keys need Xcode
+(they are `__noChroot` derivations, logos-nix ADR 0002), so only macOS produces
+them at all; `packages.aarch64-android` is built from logos-nix's canonical
+Android build platform, so on a Mac use
 `legacyPackages.aarch64-darwin.mobile.aarch64-android.bare` instead.
 
 ---
