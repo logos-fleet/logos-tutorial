@@ -407,6 +407,31 @@ own copy, so it tracks the ABI as it grows — you do not need to memorise the
 list above. `type: ui_qml` backends and hand-written Qt (`interface: legacy`)
 modules have no protocol-free form and expose no `bare` output at all.
 
+The same artifact is what a phone loads, cross-built:
+
+```bash
+nix build .#packages.aarch64-ios.bare            # iPhone / iPad
+nix build .#packages.aarch64-ios-simulator.bare  # the simulator
+nix build .#packages.aarch64-android.bare        # arm64-v8a
+```
+
+Each of those keys carries `bare` and nothing else — there is no Qt plugin host
+on a phone, which is the reason the Bare module exists. The artifact takes the
+shape the platform's loader demands: on iOS a flat embedded framework
+(`Library/Frameworks/<name>_bare.framework/`) with an `Info.plist` and an
+`@rpath/<name>_bare.framework/<name>_bare` install_name, for an app to copy into
+`<App>.app/Frameworks/` with Code Sign On Copy; on Android
+`lib/lib<name>_bare.so`, because an APK carries only `lib*.so`. On Android it
+also records `NEEDED liblogos_protocol.so`, which is the only way bionic lets a
+`dlopen`'d image reach an app library's symbols — `lp_*` stays undefined either
+way.
+
+Two limits: a `codegen.rust` or Go core does not cross (its compiled archive is
+staged for the build platform) and is refused by name, and
+`packages.aarch64-android` is built from logos-nix's canonical Android build
+platform, so on a Mac use
+`legacyPackages.aarch64-darwin.mobile.aarch64-android.bare` instead.
+
 ---
 
 ### 1.6 Concurrent dispatch
