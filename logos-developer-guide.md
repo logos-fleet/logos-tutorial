@@ -441,14 +441,18 @@ beside the `.so`.
 
 A `codegen.rust` core crosses like the C++ one — the crate is recompiled for the
 target and staged over the build-platform archive `generate` left in `lib/`, so
-nothing about authoring changes. Two limits remain: a module declaring
-`nix.external_libraries` is refused a mobile bare by name (those images come
-from their own flakes, which have to publish a package for the target), as is a
-Go core; and `packages.aarch64-android` is built from logos-nix's canonical
+nothing about authoring changes. What does not cross is refused by name at eval
+rather than left to the linker:
+
+- a module declaring `nix.external_libraries`. Those images come from their own
+  flakes, which have to publish a package for the target;
+- a Go core, for the same reason with no cross toolchain wired in.
+
+Which machine builds which key is a separate matter. The iOS keys need Xcode
+(they are `__noChroot` derivations, logos-nix ADR 0002), so only macOS produces
+them at all; `packages.aarch64-android` is built from logos-nix's canonical
 Android build platform, so on a Mac use
-`legacyPackages.aarch64-darwin.mobile.aarch64-android.bare` instead. The iOS
-keys need Xcode on the machine (they are `__noChroot` derivations, logos-nix
-ADR 0002), so only macOS produces them at all.
+`legacyPackages.aarch64-darwin.mobile.aarch64-android.bare` instead.
 
 ---
 
