@@ -37,17 +37,17 @@ Create a new directory and initialise it from the minimal module template:
 ### 1.1 Create the project from the template
 
 ```bash
-nix flake init -t github:logos-co/logos-module-builder/0.2.0
+nix flake init -t github:logos-co/logos-module-builder
 ```
 
 This scaffolds a `flake.nix`, `metadata.json`, `CMakeLists.txt`, and a `src/` directory pre-wired for `logos-module-builder`. As in Part 1 we use the newer **pure-C++ (`interface: universal`) pattern**, so we replace the template's example `src/` files with a single plain `*_impl.h` / `*_impl.cpp` class.
 
 ### 1.2 Remove the template's example sources
 
-The minimal template ships an example Qt plugin (`minimal_*`). Delete those — this tutorial supplies its own pure-C++ `src/` files:
+The minimal template ships an example `minimal_impl` class. Delete it — this tutorial supplies its own `src/` files:
 
 ```bash
-rm -f src/minimal_interface.h src/minimal_plugin.h src/minimal_plugin.cpp
+rm -f src/minimal_impl.h src/minimal_impl.cpp
 ```
 
 ---
@@ -130,7 +130,7 @@ Declare `calc_module` as a flake input. The input attribute name **must match** 
   description = "Aggregator core module - composes calc_module and showcases LogosModuleContext";
 
   inputs = {
-    logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.0";
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
 
     # The module this one depends on. Placeholder path — locked to your
     # real checkout in the build step via `--override-input`.
@@ -455,7 +455,7 @@ Use `lm` to confirm the dependency and the public API made it into the binary.
 ### 5.1 Build `lm`
 
 ```bash
-nix build 'github:logos-co/logos-module/0.2.0#lm' --out-link ./lm
+nix build 'github:logos-co/logos-module#lm' --out-link ./lm
 ```
 
 ### 5.2 View metadata — note the dependency
@@ -485,7 +485,7 @@ Dependencies: calc_module
 ./lm/bin/lm methods result/lib/calc_aggregator_plugin.dylib  # macOS
 ```
 
-Every `public` method on the impl is here — `int64_t` shows up as `int`, `std::string` as `QString`, and `LogosMap` (from `computeReport`) as `QVariantMap`, because `lm` reports the wire types the generated glue exposes.
+Every `public` method on the impl is here, published in the **LIDL contract** vocabulary rather than in C++ or Qt names: `int64_t` shows up as `int`, `std::string` as `tstr`, and `LogosMap` (from `computeReport`) as `{tstr: any}`. `lm` is reporting what the module says about itself, and what a module publishes is its contract — the same words the generated `.lidl` uses, and the same words a Rust or Nim module implementing this contract would answer with.
 
 ---
 
@@ -498,11 +498,11 @@ Now the payoff: run `calc_aggregator` **and** its `calc_module` dependency under
 Build `logoscore` and the package manager, then install **both** modules into a `modules/` directory `logoscore` can scan. The aggregator comes from this project; `calc_module` from your Part 1 checkout:
 
 ```bash
-nix build 'github:logos-co/logos-logoscore-cli/0.2.0' --out-link ./logos
+nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos
 ```
 
 ```bash
-nix build 'github:logos-co/logos-package-manager/0.2.0#cli' --out-link ./pm
+nix build 'github:logos-co/logos-package-manager#cli' --out-link ./pm
 ```
 
 ```bash

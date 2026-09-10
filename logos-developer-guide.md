@@ -7,14 +7,18 @@ A comprehensive guide to creating, building, testing, packaging, and distributin
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
+  - [Required](#required)
+  - [Recommended Knowledge](#recommended-knowledge)
 - [Part 1: Creating a Module](#part-1-creating-a-module)
   - [1.1 Scaffold with logos-module-builder](#11-scaffold-with-logos-module-builder)
   - [1.2 Project Structure](#12-project-structure)
   - [1.3 The metadata.json Configuration](#13-the-metadatajson-configuration)
-  - [1.4 Writing Module Code](#14-writing-module-code)
+  - [1.4 Understanding the Module Code](#14-understanding-the-module-code)
   - [1.5 Building Your Module](#15-building-your-module)
+  - [1.6 Concurrent dispatch](#16-concurrent-dispatch)
+  - [1.7 Authoring in Rust and Nim](#17-authoring-in-rust-and-nim)
 - [Part 2: Inspecting Your Module](#part-2-inspecting-your-module)
-  - [2.1 The lm CLI Tool](#21-the-lm-cli-tool)
+  - [2.1 The `lm` CLI Tool](#21-the-lm-cli-tool)
   - [2.2 The logos-module-viewer](#22-the-logos-module-viewer)
 - [Part 3: Testing UI Modules](#part-3-testing-ui-modules)
   - [3.1 How It Works](#31-how-it-works)
@@ -23,30 +27,50 @@ A comprehensive guide to creating, building, testing, packaging, and distributin
 - [Part 4: Packaging Your Module](#part-4-packaging-your-module)
   - [4.1 The LGX Package Format](#41-the-lgx-package-format)
   - [4.2 Building LGX Packages](#42-building-lgx-packages)
-    - [Built-in Nix Derivation (Preferred)](#built-in-nix-derivation-preferred)
-    - [Using nix bundle (Alternative)](#using-nix-bundle-alternative)
 - [Part 5: Installing and Managing Modules](#part-5-installing-and-managing-modules)
-  - [5.1 The lgpm CLI](#51-the-lgpm-cli)
+  - [5.1 The `lgpm` CLI](#51-the-lgpm-cli)
   - [5.2 Installing from Local Files](#52-installing-from-local-files)
-  - [5.3 Installing from a Registry](#53-installing-from-a-registry)
+  - [5.3 Downloading and Installing from a Registry](#53-downloading-and-installing-from-a-registry)
 - [Part 6: Running Your Module](#part-6-running-your-module)
-  - [6.1 Running with logoscore](#61-running-with-logoscore)
+  - [6.1 Running with `logoscore`](#61-running-with-logoscore)
 - [Part 7: Running in logos-basecamp](#part-7-running-in-logos-basecamp)
   - [7.1 Building logos-basecamp](#71-building-logos-basecamp)
   - [7.2 Module Types in logos-basecamp](#72-module-types-in-logos-basecamp)
 - [Part 8: Inter-Module Communication](#part-8-inter-module-communication)
   - [8.1 The LogosAPI](#81-the-logosapi)
   - [8.2 The C++ SDK Code Generator](#82-the-c-sdk-code-generator)
+  - [Optional dependencies](#optional-dependencies)
+  - [Dependency Interfaces](#dependency-interfaces)
+  - [Who Is Calling — Caller Identity](#who-is-calling--caller-identity)
+  - [Asking the Host What Is Running — `modules_state`](#asking-the-host-what-is-running--modulesstate)
   - [8.3 LogosResult](#83-logosresult)
   - [8.4 Communication Modes](#84-communication-modes)
+  - [8.5 App-to-App Intents](#85-app-to-app-intents)
 - [Part 9: Advanced Topics](#part-9-advanced-topics)
   - [9.1 Tutorials](#91-tutorials)
   - [9.2 Module Dependencies](#92-module-dependencies)
+  - [9.3 Exposing OpenMetrics / Prometheus Metrics](#93-exposing-openmetrics--prometheus-metrics)
+  - [9.4 Platform-keyed metadata](#94-platform-keyed-metadata)
+  - [9.5 Finishing before teardown](#95-finishing-before-teardown)
 - [Reference: Repository Map](#reference-repository-map)
 - [Reference: CLI Tools Summary](#reference-cli-tools-summary)
+  - [`lm` -- Module Inspector](#lm----module-inspector)
+  - [`logoscore` -- Headless Runtime](#logoscore----headless-runtime)
+  - [`lgpm` -- Local Package Manager](#lgpm----local-package-manager)
+  - [`lgpd` -- Package Downloader](#lgpd----package-downloader)
+  - [`logos-cpp-generator` -- SDK Code Generator](#logos-cpp-generator----sdk-code-generator)
+  - [`nix-bundle-lgx` -- LGX Bundler](#nix-bundle-lgx----lgx-bundler)
+- [Reference: Flake Outputs](#reference-flake-outputs)
 - [Troubleshooting](#troubleshooting)
-
----
+  - ["experimental features" error with Nix](#experimental-features-error-with-nix)
+  - [Module loads but LogosAPI is not available](#module-loads-but-logosapi-is-not-available)
+  - [Module not discovered by logos-basecamp](#module-not-discovered-by-logos-basecamp)
+  - [lgpm install fails](#lgpm-install-fails)
+  - [Checking if a module loaded successfully](#checking-if-a-module-loaded-successfully)
+  - [UI module `nix run` fails to load dependencies](#ui-module-nix-run-fails-to-load-dependencies)
+  - [Capability module not found](#capability-module-not-found)
+  - [LGX variant mismatch](#lgx-variant-mismatch)
+  - [Cross-platform builds](#cross-platform-builds)
 
 ## Overview
 
@@ -146,18 +170,26 @@ nix flake init -t github:logos-co/logos-module-builder#ui-qml-backend
 
 # For ui_qml modules (QML-only, no C++)
 nix flake init -t github:logos-co/logos-module-builder#ui-qml
+
+# Or scaffold the same core module written in Rust
+nix flake init -t github:logos-co/logos-module-builder#rust
+
+# Or a Rust module that links an external C library
+nix flake init -t github:logos-co/logos-module-builder#rust-with-external-lib
 ```
 
-> **Note:** The generated `flake.nix` uses an unpinned `logos-module-builder` URL. For reproducible builds, pin it to a specific commit — see the `flake.nix` examples in [Section 3.2](#32-building-lgx-packages) and the [tutorials](tutorial-wrapping-c-library.md#23-flakenix--nix-build-config).
+> **Note:** The generated `flake.nix` uses an unpinned `logos-module-builder` URL. For reproducible builds, pin it to a specific commit — see the `flake.nix` examples in [§4.2 Building LGX Packages](#42-building-lgx-packages) and the [tutorials](tutorial-wrapping-c-library.md#23-flakenix--nix-build-config).
 
 **Available templates:**
 
-| Template            | Use Case                                              |
-| ------------------- | ----------------------------------------------------- |
-| `default`           | Minimal core module (C++ backend, no UI)              |
-| `with-external-lib` | Core module wrapping an external C/C++ library        |
-| `ui-qml-backend`    | ui_qml with C++ backend + QML view (process-isolated) |
-| `ui-qml`            | ui_qml QML-only (in-process, no C++)                  |
+| Template                 | Use Case                                              |
+| ------------------------ | ----------------------------------------------------- |
+| `default`                | Minimal core module (C++ backend, no UI)              |
+| `with-external-lib`      | Core module wrapping an external C/C++ library        |
+| `ui-qml-backend`         | ui_qml with C++ backend + QML view (process-isolated) |
+| `ui-qml`                 | ui_qml QML-only (in-process, no C++)                  |
+| `rust`                   | Minimal core module written in Rust                   |
+| `rust-with-external-lib` | Rust core module linking an external C library        |
 
 The `ui-qml-backend` and `ui-qml` templates automatically enable `nix run` to launch and test your UI plugin in isolation without the full logos-basecamp shell. The standalone app runner is bundled with `logos-module-builder` — no extra flake input is needed. All module dependencies declared in `metadata.json` are auto-bundled from their LGX packages.
 
@@ -197,7 +229,7 @@ The full set of available fields:
   "type": "core",
   "category": "general",
   "description": "My first Logos module",
-  "icon": null,
+  "icon": "src/icons/my_module.png",
   "main": "my_module_plugin",
   "interface": "universal",
   "dependencies": [],
@@ -229,15 +261,22 @@ The full set of available fields:
 | `type`                           | No                                     | `core`             | Module type (`core`, `ui`, `ui_qml`)                                                                                                                                                                                                                           |
 | `category`                       | No                                     | `general`          | Category (general, network, chat, wallet, integration)                                                                                                                                                                                                         |
 | `description`                    | No                                     | `"A Logos module"` | Human-readable description                                                                                                                                                                                                                                     |
-| `icon`                           | No                                     | `null`             | Relative path to the module icon (used by UI modules). The build system includes it in the standalone app plugin directory.                                                                                                                                    |
+| `icon`                           | No                                     | `null`             | Relative path to the module icon. **PNG, exactly 256x256.** Required for `ui_qml` modules (manifest 0.4.0+), optional for `core`. Bundled once at `assets/icon.png` inside the `.lgx` so hosts can show it before install; also copied into the standalone app plugin directory. Convention: `src/icons/<module_name>.png`.                                                                                                                                    |
 | `main`                           | Yes (`core`/`ui`), optional (`ui_qml`) | --                 | Plugin entry point. For `core`/`ui` modules: plugin name without extension (the generated `<name>_plugin`). For `ui_qml`: optional backend plugin name (omit if QML-only).                                                                                     |
-| `interface`                      | No                                     | --                 | Set to `"universal"` for the pure-C++ pattern: you write a plain `src/<name>_impl.h`/`.cpp` and the builder runs `logos-cpp-generator --from-header` to synthesize the Qt plugin. Omit for the older hand-written Qt-plugin pattern.                            |
+| `interface`                      | No                                     | --                 | Authoring model. `"universal"` is the pure-C++ pattern: you write a plain `src/<name>_impl.h`/`.cpp` and the builder runs `logos-cpp-generator --from-header` to synthesize the Qt plugin. `"cdylib"` is the path for modules whose core is **Rust or Nim** — see [§1.7](#17-authoring-in-rust-and-nim). Omit for the older hand-written Qt-plugin pattern.                            |
+| `codegen`                        | No (required for `cdylib`)             | `{}`               | Where the builder finds your code and your contract. `codegen.rust = { crate, trait?, source?, staticlib? }` and `codegen.nim = { crate, main?, staticlib?, link? }` select a language core; `codegen.lidl` names a committed contract; `codegen.impl_header` / `impl_class` override the `universal` defaults. See [§1.7](#17-authoring-in-rust-and-nim).                            |
 | `concurrency`                    | No                                     | `"single"`         | Dispatch mode. `"single"` (default): calls to this module are dispatched one at a time (event-loop semantics) — you need no thread-safety. `"multi"`: handlers run **concurrently** on a worker pool, so one blocking handler (a slow download, a slow RPC) no longer stalls other callers — but **you** own thread-safety. See [§1.6 Concurrent dispatch](#16-concurrent-dispatch).                            |
+| `max_workers`                    | No                                     | `null`             | Worker-pool cap for a `"multi"` module. `null` lets the runtime size the pool to available parallelism. Ignored for `"single"`.                            |
 | `view`                           | Yes (`ui_qml`)                         | --                 | Relative path to the QML entry file (e.g. `Main.qml`). Required for `ui_qml` modules.                                                                                                                                                                          |
-| `dependencies`                   | No                                     | `[]`               | Other Logos module names this depends on. Each entry must match the `name` field in that dependency's `metadata.json`.                                                                                                                                         |
+| `dependencies`                   | No                                     | `[]`               | Other Logos module names this **requires**. Each entry must match the `name` field in that dependency's `metadata.json`. Auto-loaded; a failure to load one fails this module.                                                                                  |
+| `optional_dependencies`          | No                                     | `[]`               | Concrete modules this one can call but does **not** require. Same entry forms and same typed `modules().<name>` wrapper as `dependencies` — but never auto-loaded, never a load failure when absent, and not bundled. See [Optional dependencies](#optional-dependencies). |
+| `provides`                       | No (`ui_qml` only)                     | `[]`               | Intents this module can service, as an **array of objects**: `[{"intent": "chat.group.open"}]`. Each entry may also carry `params` describing the payload it expects, which the shell enforces before dispatch — see §8.5. Intent **names** are carried into the signed `.lgx` manifest (0.5.0+) so a catalog can answer "which installable package provides X?"; `params` stays here, in `metadata.json`, which is the copy the shell reads. See §8.5.                                     |
+| `uses`                           | No (`ui_qml` only)                     | `[]`               | Intents this module may request, as an **array of objects**: `[{"intent": "wallet.sign", "cardinality": "single"}]`. Mandatory to request one — an undeclared request fails `not_declared`. `cardinality` is optional; only `single` is accepted today (`all` is reserved). ⚠ A bare string array is silently ignored — see §8.5. |
 | `interface_dependencies`         | No                                     | `[]`               | Header *interfaces* this module binds at runtime, decoupled from any concrete module. Each entry is `{ name, file, impl_class?, input? }` — see [Dependency interfaces](#dependency-interfaces) and the [tutorial](tutorial-interface-dependencies.md).         |
 | `dependency_overrides`           | No                                     | `{}`               | Per-dependency LIDL-contract source overrides, keyed by dependency name → `{ file, input?, impl_class? }`. Forces where a dependency's interface is read from; normally auto-resolved from the dep's `lidl` output. See [§9.2 Module Dependencies](#92-module-dependencies).                                                                |
-| `include`                        | No                                     | `[]`               | Additional files (e.g. shared libraries like `libwaku.so`, `libwaku.dylib`) to bundle alongside the plugin in the output.                                                                                                                                      |
+| `host_services`                  | No                                     | `[]`               | Privileged host capabilities granted into the module's own image. Closed set: `token_registry`, `token_delivery` — both trust-root, and both hard-allowlisted to `capability_module` alone, because a build-time allowlist a module could extend from its own metadata would not be an allowlist. An ungranted module asking for one gets `LP_ERR_UNSUPPORTED` at runtime, however loudly its metadata asked.                            |
+| `platforms`                      | No                                     | `[]`               | Platform-keyed overlays merged into this metadata before anything else reads it. See [§9.4 Platform-keyed metadata](#94-platform-keyed-metadata).                            |
+| `include`                        | No                                     | `[]`               | Runtime files to stage beside the plugin that nothing links against — in practice, **`dlopen`'d libraries**. Nothing else can stage these: a library reached only through `dlopen` has no import-table or `DT_NEEDED` entry for the build to follow. Names are looked up in this module's `nix.packages.runtime` and resolved external libraries, under both `lib/` and `bin/`. A name that matches nothing is **normal** — the list is a deliberate cross-platform superset (`.so`, `.dylib` and `.dll` side by side), so at most one spelling can match.                                                                                                                                      |
 | `nix.packages.build`             | No                                     | `[]`               | Nix packages for build time                                                                                                                                                                                                                                    |
 | `nix.packages.runtime`           | No                                     | `[]`               | Nix packages for runtime                                                                                                                                                                                                                                       |
 | `nix.external_libraries`         | No                                     | `[]`               | External C/C++ libraries to wrap. Each entry is an object — see [configuration reference](https://github.com/logos-co/logos-module-builder/blob/master/docs/configuration.md#nixexternal_libraries) for fields (`name`, `vendor_path`, `build_command`, etc.). |
@@ -417,6 +456,92 @@ guaranteed** — don't rely on "event X always arrives before method Y returns";
 instead of the result — rebuild callers against ≥ 0.2 (still compatible with every
 existing module) to consume a `multi` module concurrently.
 
+
+### 1.7 Authoring in Rust and Nim
+
+`interface: "cdylib"` builds a module whose core is written in another language.
+The plugin the host loads is the same artifact a C++ module produces — `lm`,
+`lgx`, `lgpm`, `logoscore` and basecamp cannot tell them apart — because the
+builder compiles your code to a static library and links it into the generated
+glue.
+
+#### Rust
+
+Two templates scaffold one:
+
+```bash
+nix flake init -t github:logos-co/logos-module-builder#rust
+nix flake init -t github:logos-co/logos-module-builder#rust-with-external-lib
+```
+
+Authoring is **Rust-first**: you write a `trait`, and the builder derives the
+`.lidl` from it. There is no `build.rs`, no committed contract to keep in step
+with the code, and no SDK version to choose — `logos-rust-sdk` is a path
+dependency the builder stages from the same revision its generator came from,
+so generated code and runtime cannot drift.
+
+```json
+"interface": "cdylib",
+"codegen": { "rust": { "crate": "rust-lib", "trait": "MyThingModule" } }
+```
+
+| Key | Meaning |
+| --- | --- |
+| `crate` | the crate directory, relative to the project root |
+| `trait` | **switches on Rust-first mode.** Omit it and the builder expects a committed `codegen.lidl` instead |
+| `source` | which file holds the trait. Default `src/lib.rs` |
+| `staticlib` | override the archive name. Defaults to the crate's `[lib]`/`[package]` name |
+
+The trait **name is derived**, not free: the module `name` in PascalCase, plus
+`Module` unless it already ends in it — `my_thing` → `MyThingModule`. Its methods
+are the module's API and its `///` comments become the contract's descriptions.
+A companion `<Trait>Events` trait declares typed events, each becoming an
+`emit_<name>` free function. Dependencies are reached through `modules().<dep>`,
+returning `Result<T, LogosError>`.
+
+`Cargo.lock` is **committed**, and the templates ship one. The crate depends on
+the SDK by a path the builder only materialises during a build, so a clean
+checkout cannot resolve it — shipping the lock is what makes `nix build` work as
+the first command you run. To regenerate it after changing dependencies, stage
+the SDK first:
+
+```bash
+nix build github:logos-co/logos-module-builder#rust-sdk-src -o logos-rust-sdk-src
+(cd rust-lib && cargo generate-lockfile)
+```
+
+Native crate dependencies go under `nix.rust`: `packages.build` become
+`nativeBuildInputs`, `packages.runtime` become `buildInputs`, and
+`nix.rust.toolchain` pins a rustc version.
+
+Worked end to end in [Writing a Module in Rust](tutorial-rust-module.md).
+
+#### Nim
+
+The same shape, one language further along:
+
+```json
+"interface": "cdylib",
+"codegen": { "nim": { "crate": "nim", "main": "my_thing.nim" } }
+```
+
+| Key | Meaning |
+| --- | --- |
+| `crate` | the Nim sources directory |
+| `main` | entry file. Default `<name>.nim` |
+| `staticlib` | archive name. Defaults to `name` with dashes replaced by underscores |
+| `link` | external C libraries to place after the Nim archive on the link line |
+
+The builder compiles with `nim c --app:staticlib --noMain --mm:orc -d:useMalloc
+-d:release` and stages the archive where CMake links it. The **whole** module
+source is staged, not just the crate directory, so sibling imports like
+`import ../src/...` resolve.
+
+> **The Nim surface is hand-written today.** Unlike Rust, there is no generator
+> deriving a contract from your code: you write the module-impl C ABI exports
+> yourself. A Nim `lidl-gen` is intended to close that gap. Treat this path as
+> newer and thinner than the Rust one, and there is no tutorial for it yet.
+
 ---
 
 ## Part 2: Inspecting Your Module
@@ -467,17 +592,49 @@ Example JSON output:
 ./lm/bin/lm methods ./result/lib/my_module_plugin.so --json
 ```
 
-Example JSON output:
+**The type names depend on which kind of module you are inspecting**, because
+two different things publish this JSON:
+
+- A **universal / cdylib module** (`"interface": "universal"`, the style used
+  throughout this guide and in the tutorials) publishes its **LIDL contract**
+  types — `tstr`, `int`, `uint`, `bstr`, `[tstr]`, `{tstr: any}`, `? uint`,
+  `result`, and a record's declared name. The module is Qt-free, so the
+  contract is the only vocabulary in which the question has one answer, and
+  a Rust module implementing the same contract answers identically.
+- A **handwritten Qt plugin** publishes what its `QMetaObject` says — `QString`,
+  `QVariantList`, `QVariantMap` — because there the metaobject *is* the
+  contract.
+
+Example JSON output, for a universal module with
+`method doSomething(input: tstr) -> tstr`:
 
 ```json
 [
   {
-    "name": "initLogos",
-    "signature": "initLogos(LogosAPI*)",
-    "returnType": "void",
+    "name": "doSomething",
+    "signature": "doSomething(tstr)",
+    "returnType": "tstr",
     "isInvokable": true,
-    "parameters": [{ "name": "logosAPIInstance", "type": "LogosAPI*" }]
+    "parameters": [{ "name": "input", "type": "tstr" }]
   },
+  {
+    "name": "name",
+    "signature": "name()",
+    "returnType": "tstr",
+    "isInvokable": true,
+    "description": "The module's name, as declared in its metadata."
+  }
+]
+```
+
+`name` and `version` are **derived**: the generator emits them from
+`metadata.json`, so every module answers them without the author writing them,
+and they appear in every listing.
+
+The same listing from a handwritten Qt plugin would instead read:
+
+```json
+[
   {
     "name": "doSomething",
     "signature": "doSomething(QString)",
@@ -609,6 +766,34 @@ mymodule.lgx (tar.gz)
 
 The **manifest.json** is auto-generated from your module's `metadata.json` by the bundler. It maps each variant to its main entry point.
 
+It is not a copy of `metadata.json`. The bundler projects a fixed set of fields
+across — including `name`, `version`, `type`, `dependencies`, `view`, `icon` and
+`provides` — and anything else stays behind in `metadata.json`. Two consequences
+worth knowing:
+
+- **`manifest.json` is signed; `metadata.json` is not.** The signature covers
+  the manifest bytes, so whatever reaches the manifest is attested by whoever
+  signed the package.
+- **`provides` is carried; `uses` is not.** A catalog needs to know what an
+  uninstalled package *can do* to suggest it; nobody outside the shell needs to
+  know what it *wants to call*.
+
+`manifestVersion` tracks the manifest schema, separately from your module's
+`version`:
+
+| Schema | Adds |
+| --- | --- |
+| `0.2.x` | plain-string dependencies |
+| `0.3.x` | dependency version ranges + signer DIDs |
+| `0.4.x` | root-level `assets/icon.png` (the 256×256 PNG contract) |
+| `0.5.x` | `provides` |
+
+Every addition so far has been an **optional** field, so a client reading a newer
+manifest ignores what it does not recognise rather than refusing the package.
+That is why a package built before 0.5.0 simply has no `provides` — and why the
+version was bumped rather than reused, so "declares no intents" stays
+distinguishable from "predates the field".
+
 ### 4.2 Building LGX Packages
 
 There are two ways to create `.lgx` packages. The preferred approach uses the built-in Nix derivation that comes with `logos-module-builder`. Alternatively, you can use the `nix bundle` command directly.
@@ -678,8 +863,11 @@ This produces a `my_module-<version>.lgx` file in the current directory.
 | `x86_64-darwin`  | `darwin-amd64-dev` | `darwin-amd64`   |
 | `aarch64-linux`  | `linux-arm64-dev`  | `linux-arm64`    |
 | `x86_64-linux`   | `linux-amd64-dev`  | `linux-amd64`    |
+| `x86_64-windows` | `windows-x86_64-dev` | `windows-x86_64` |
 
 > **Important:** The variant type matters when installing into `logos-basecamp`. A dev build of basecamp expects dev variants, and a portable build expects portable variants. Use the `dual` bundler to produce packages that work with both.
+
+> **Windows is cross-built only.** `x86_64-windows` is a pseudo-system: there is no Nix daemon for Windows, so the package is produced on a Linux (or macOS) machine targeting `x86_64-w64-mingw32` and copied across. Note the variant is spelled `windows-x86_64`, not `windows-amd64` — unlike Linux, it has no alias, so a package labelled `windows-amd64` will not install.
 
 ---
 
@@ -720,7 +908,38 @@ nix build 'github:logos-co/logos-package-manager#cli' --out-link ./package-manag
 | `--modules-dir <path>`    | Target directory for installed core modules |
 | `--ui-plugins-dir <path>` | Target directory for UI plugins             |
 | `--json`                  | Output in JSON format                       |
+| `--platform <variant>`    | Install for a platform other than this machine (see below) |
 | `-h, --help`              | Show help                                   |
+
+#### Installing for another platform
+
+By default `lgpm` derives the variant from the machine it is running on, and
+**refuses** a package that does not provide it:
+
+```
+Error: Package does not contain variant for platform: linux-x86_64-dev
+       (package provides: windows-x86_64-dev)
+```
+
+That refusal is the protection against installing a package built for one
+platform onto another, so it is deliberately fail-closed. Cross-building needs an
+explicit opt-out — the Nix install bundler, for instance, runs `lgpm` on a Linux
+builder to lay out a Windows package:
+
+```bash
+lgpm --modules-dir ./modules install --platform windows-x86_64 --file ./my_module.lgx
+```
+
+`--platform` applies to `install`, `list` and `info` alike, so all three agree on
+which platform is being managed, and `lgpm` prints the override to stderr when it
+is in effect — a silent platform switch would defeat the very check it bypasses.
+
+> **Do not reach for `--platform` to resolve a dev/portable variant mismatch.**
+> If a package provides `darwin-arm64` and your basecamp wants
+> `darwin-arm64-dev`, the fix is to build the right variant (or use the `dual`
+> bundler), not to override the platform — forcing it installs a package the
+> runtime cannot load, turning a clear install-time error into a confusing
+> load-time one.
 
 ### 5.2 Installing from Local Files
 
@@ -896,7 +1115,7 @@ nix build 'github:logos-co/logos-basecamp#bin-appimage'       # Linux AppImage
 nix build 'github:logos-co/logos-basecamp#bin-macos-app'      # macOS .app bundle
 ```
 
-> **Note:** When installing modules into logos-basecamp, the LGX variant type must match the build type. Dev builds of basecamp expect **dev** LGX variants (e.g., `darwin-arm64-dev`), while portable builds expect **portable** variants (e.g., `darwin-arm64`). Use the `dual` bundler (see [3.2](#32-bundling-with-nix-bundle-lgx)) to produce packages that work with both.
+> **Note:** When installing modules into logos-basecamp, the LGX variant type must match the build type. Dev builds of basecamp expect **dev** LGX variants (e.g., `darwin-arm64-dev`), while portable builds expect **portable** variants (e.g., `darwin-arm64`). Use the `dual` bundler (see [§4.2](#42-building-lgx-packages)) to produce packages that work with both.
 
 ### 7.2 Module Types in logos-basecamp
 
@@ -1021,18 +1240,38 @@ The generator is bundled with `logos-cpp-sdk`. It is automatically available:
 #### Generating Wrappers
 
 ```bash
-# Generate wrappers for a single module
-logos-cpp-generator /path/to/my_module_plugin.so --output-dir ./generated
+# Generate wrappers for a single module, from the CONTRACT it ships beside its
+# plugin. `--events-from` names that contract, and the wrapper's typed methods,
+# record structs and typed on<Event>() accessors all come from it.
+logos-cpp-generator /path/to/my_module_plugin.so --output-dir ./generated \
+  --events-from /path/to/share/logos/my_module.lidl
 
-# Generate wrappers for all dependencies listed in metadata.json
-logos-cpp-generator --metadata metadata.json --module-dir /path/to/modules --output-dir ./generated
+# A handcrafted Qt module publishes no contract; omit the flag and the wrapper
+# comes from the plugin's Qt metaobject, which is then the only description of
+# its API that exists.
+logos-cpp-generator /path/to/handcrafted_plugin.so --output-dir ./generated
+
+# Generate a wrapper per dependency, each from that dependency's LIDL contract
+logos-cpp-generator --metadata metadata.json --general-only --output-dir ./generated \
+  --dep waku_module=/path/to/waku_module.lidl
 
 # Generate only module files (no umbrella headers)
-logos-cpp-generator /path/to/plugin.so --module-only --output-dir ./generated
+logos-cpp-generator /path/to/plugin.so --module-only --output-dir ./generated \
+  --events-from /path/to/share/logos/my_module.lidl
 
 # Generate only umbrella SDK files (assumes module files exist)
 logos-cpp-generator --metadata metadata.json --general-only --output-dir ./generated
 ```
+
+> **Why `--events-from` is not optional for a module that has a contract.** A
+> module built with `interface: "universal"` or `"cdylib"` publishes its
+> `getMethods()` metadata in the LIDL contract vocabulary (`tstr`, `[uint]`,
+> `result`) — that listing is what `lm` and `logoscore` show a human, and Qt
+> type names would be the wrong answer for a Qt-free module. The wrapper
+> emitter reads Qt type names, so generating from that listing would silently
+> produce a wrapper of `QVariant` / `LogosMap`. It refuses instead, naming the
+> contract to pass. Nix builds pass it for you: `buildHeaders.nix` finds
+> `<module>/share/logos/<name>.lidl`, which `buildPlugin.nix` installed.
 
 #### Using Generated Wrappers
 
@@ -1061,6 +1300,79 @@ void MyModulePlugin::initLogos(LogosAPI* api) {
 The generated `LogosModules` struct provides a member for each module, with methods matching the module's `Q_INVOKABLE` methods. For every method `foo()`, an async variant `fooAsync()` is also generated that takes a callback parameter.
 
 > **Prefer async wrappers.** Use `doSomethingAsync(...)` instead of `doSomething(...)` to avoid blocking the caller's thread. Synchronous calls can cause hangs if the target module is slow to respond.
+
+### Optional dependencies
+
+A module can name what it talks to in three ways, and they differ in **who picks
+the module** and **who guarantees it is running** — not in how you call it:
+
+| Field | Module chosen | Loader behaviour | Reached as |
+| --- | --- | --- | --- |
+| `dependencies` | at build time | auto-loaded; a failure to load one fails this module | `modules().<name>` |
+| `optional_dependencies` | at build time | never loaded, never required | `modules().<name>` |
+| `interface_dependencies` | at **runtime**, by you | never loaded | `modules().bind_<iface>(name)` |
+
+`optional_dependencies` is the middle one: the module name is concrete, so you
+get the same typed wrapper as a required dependency, but nothing guarantees it
+is there. [Optional Dependencies and the Module
+Registry](tutorial-modules-state.md) walks the whole thing end to end — the same
+module run with its dependency missing, present, and pulled out from under it.
+
+```json
+"optional_dependencies": ["modules_state", "verified_proxy_module"]
+```
+
+Three things follow, all of them about lifetime:
+
+- the loader **never brings one up**, and never fails a load because one is missing;
+- unloading one **does not** take its dependents down;
+- it is **not bundled** — your consumers do not inherit its runtime closure.
+
+That last point is usually the reason to reach for this. Declaring a heavyweight
+module as a required dependency drags its whole closure into every consumer of
+*your* module, its tests and its packages, including users who will never install
+it.
+
+**Something else owns the lifetime.** Loading your module does not load these, so
+whatever brings them up — the app, `logoscore -l`, a package manager — has to.
+Write the module so it works when they are absent.
+
+**Bound the call.** A call to a module that is not running costs the full
+protocol deadline before it fails, so say what you are willing to wait:
+
+```cpp
+logos::CallError err;
+auto verdict = modules().verified_proxy_module.check(chainId, &err, /*timeout_ms=*/1500);
+if (err.code == "object_unavailable") { /* not running — carry on without it */ }
+```
+
+`object_unavailable` is how you tell "not there" from "there, and it said no".
+A module that ran and returned nothing is a different answer from one that was
+never reachable, and code that cannot tell them apart will eventually treat a
+sick dependency as a missing one.
+
+**Or ask first**, with `modules_state.is_ready("<name>")`. It reads the host's
+own registry, so it can say a module is genuinely **absent** — which nothing
+the transport sees locally can. Two limits: it answers the *host's* view rather
+than "a call from me will succeed" (it goes true a few hundred milliseconds
+early, before the per-caller token handshake), and a runtime whose
+`modules_state` feed is stale reports an empty listing. So treat a "yes" as
+reliable and a "no" as a hint — never the other way round, or a stale feed will
+have you skipping modules that are running.
+
+Each name still needs a flake input — the contract has to come from somewhere —
+but nothing is *built* from it: only the dependency's published `.lidl` is read.
+A name that publishes no contract is refused at build time rather than quietly
+falling back to building it, which would defeat the point. A name may not appear
+in `dependencies` or `interface_dependencies` as well: `modules()` has one member
+per name.
+
+Both kinds also reach the `.lgx` **manifest** (0.6.0), the only copy an
+installer or catalog can read before unpacking: `optional_dependencies` so an
+installer can offer them without calling a package broken when one is absent,
+and `interface_dependencies` as **names only** — `file` and `impl_class` are
+paths into your own source tree and mean nothing in a shipped package, the same
+reason `provides` carries intent names alone.
 
 ### Dependency Interfaces
 
@@ -1109,6 +1421,107 @@ calc.onVersionReady([](const std::string& v){ ... });  // typed event subscripti
 Binding is **not validated**: a module that does not satisfy the interface surfaces an ordinary remote-call error (a default-valued result), never a crash — so you can swap providers just by changing the bound name. The provider must be loaded at runtime; declaring it in `dependencies` is one way to ensure that, but the interface itself names no module.
 
 See the [Dependency Interfaces tutorial](tutorial-interface-dependencies.md) for an end-to-end walkthrough, and [Composing Modules](tutorial-composing-modules.md) for the concrete-dependency counterpart.
+
+### Who Is Calling — Caller Identity
+
+Some methods should not be open to every module. You read who is calling with
+`logos::currentCaller()`:
+
+```cpp
+#include <logos_caller.h>
+
+std::string MyThingImpl::setLimit(int64_t n) {
+    const logos::LogosCaller caller = logos::currentCaller();
+    if (!caller.isModule("admin_module"))
+        return "refused";
+    m_limit = n;
+    return "ok";
+}
+```
+
+It is **ambient**, not a parameter: it never appears in a `.lidl`, and no method
+opts in. By the time your handler runs the caller has presented a token this
+module itself issued, so the identity is a fact the callee possesses rather than
+a claim the caller makes — an unauthorized call never reaches your handler at all.
+
+`LogosCaller` has five arms:
+
+| Arm | Carries | Seen when |
+| --- | --- | --- |
+| `Host` | **nothing** | the runtime itself — including a `logoscore call`, which the daemon relays under the host anchor |
+| `Module` | `name`, optional `instance` | one module calling another |
+| `Derived` | `parent`, `leaf` | a derived identity, e.g. a UI plugin under its module |
+| `Operator` | `name` | a named operator token |
+| `Unknown` | — | everything else |
+
+with `isHost()`, `isModule()`, `isModule(name)` (which ignores the instance, so a
+restarted module is still itself), `isDerived()`, `isOperator()` and `isUnknown()`.
+
+**`Host` carries no name, ever.** `"core"` and `"capability_module"` hold the same
+token value under two keys, so a name there would be a coin flip presented as a
+fact. Ask `isHost()`; do not go looking for which part of the runtime called.
+
+**`Unknown` is the fail-closed answer, and it is in band.** It covers an unnamed
+caller, a document this build cannot read, an arm from a newer protocol, and *no
+dispatch in flight on this thread* — a spawned worker, a timer, `onContextReady`,
+an event emission. Write the gate as `if (!caller.isModule(...)) refuse;` so every
+arm you did not think about lands on the refusal path.
+
+**The identity is valid for one dispatch, on the dispatching thread.** A handler
+that needs it later must copy it at the top.
+
+Two builds read `Unknown` forever, quietly. A **legacy `Q_INVOKABLE` Qt plugin**
+has no generated glue, so nothing pushes the identity in. And a module generated
+below **logos-protocol 0.6** has no caller machinery at all, yet still compiles,
+links and loads. Neither warns you — which is why a refusal should name what it
+saw.
+
+In Rust the surface is `logos_rust_sdk::current_caller()`, returning
+`Unknown | HostAnchor | Module{name, instance} | Derived{parent, leaf} | Operator{name}`,
+with `is_module(name)`, `identity()` for a map key and `describe_for_human()` for
+a log line.
+
+Worked end to end in [Caller Identity](tutorial-caller-identity.md).
+
+### Asking the Host What Is Running — `modules_state`
+
+`modules_state` is a read-only registry of every module the host knows about. It
+ships with the runtime and is loaded for you, so it is normally named under
+`optional_dependencies` rather than `dependencies`.
+
+| Call | Answers |
+| --- | --- |
+| `list_modules()` | a `ModuleListing` — every known module, plus `partial` and a listing-level `seq` |
+| `module_record(name)` | one record, or **null** |
+| `is_ready(name)` | loaded **and** has published its object |
+| `module_state_changed` | every applied transition, as an old/new pair |
+
+Records carry six states — `unloaded`, `loading`, `loaded`, `ready`, `stopping`,
+`error`. A seventh, `absent`, appears **only in events**: a module that is absent
+is simply not in the listing, and `module_record` answers null. One spelling for
+"not there", not two — and `absent` (never heard of it) is a different answer from
+`unloaded` (installed, not running).
+
+Three things to get right:
+
+- **null is not a failure.** The empty optional crosses the wire as JSON null;
+  success or failure is decided by the call's error channel, never by the value.
+- **`partial: true` is an honest short answer**, not a health flag — the host's
+  last scan skipped something. A silently short list would be worse.
+- **Treat an unrecognised state as "not loaded", never as an error.** That rule is
+  normative: otherwise the day a new state is introduced is the day every existing
+  consumer breaks.
+
+`is_ready` answers *the host's* view, not "a call from me will succeed" — that
+additionally needs a per-caller handshake this module cannot know about, so it
+goes true a few hundred milliseconds early. Treat a **yes** as reliable and a
+**no** as a hint, never the other way round.
+
+Its read surface is open to every module. Its ingest surface — `note_transition`
+and `apply_snapshot`, which write the facts everyone else trusts — admits the
+**host only**, gated exactly as described above.
+
+Worked end to end in [Optional Dependencies and the Module Registry](tutorial-modules-state.md).
 
 ### 8.3 LogosResult
 
@@ -1172,6 +1585,185 @@ LogosModeConfig::setMode(LogosMode::Local);
 LogosModeConfig::setMode(LogosMode::Remote);
 ```
 
+### 8.5 App-to-App Intents
+
+Everything above is a module calling a **named** module: you know who you want
+and you call it. Intents are the other shape — you name a **capability** and let
+the shell find a provider.
+
+**Intents are for `ui_qml` apps only, and that is a design line rather than a
+V1 limit.** Core modules already call each other by name through `LogosAPI`
+(§8.1–§8.4), with no chooser and nothing to consent to. `provides` / `uses` on a
+non-`ui_qml` module are discarded before they are ever read, and — unlike the
+mistakes below — that drop is **silent**.
+
+```qml
+// "Somebody show this chat group." The requester never learns who did.
+logos.request("chat.group.open", { groupId: "abc123" }, function (res) {
+    if (res.ok) console.log("opened by", res.data.provider);
+    else        console.log("failed:", res.error);
+});
+```
+
+Use `callModule` when you depend on a specific module. Use an intent when you
+want a capability and any qualified app will do — that is what lets a second
+wallet be installed and picked without the calling app knowing it exists.
+
+#### Declaring intents
+
+Both keys go in `metadata.json`, and both are **arrays of objects**:
+
+```json
+"provides": [ { "intent": "chat.group.open" } ],
+"uses":     [ { "intent": "wallet.sign", "cardinality": "single" } ]
+```
+
+> **The most common mistake.** A bare string array is silently ignored:
+>
+> ```json
+> "uses": ["wallet.sign"]          ← WRONG. Parsed, discarded, no build error.
+> "uses": [{"intent": "wallet.sign"}]   ← right
+> ```
+>
+> The request then fails with `not_declared`. The shell does say so, though:
+> look for an `IntentRegistry:` warning naming your module at startup.
+> Check the shell's log for `IntentRegistry:` lines, which name every
+> declaration that was skipped and why.
+
+`uses` is mandatory: an app may only request intents it declared. That bounds an
+app's reachable capabilities to a set fixed when the package was built, so a
+compromised view cannot reach for something the package never asked for.
+
+The `logos.` prefix is reserved for capabilities the shell itself provides and
+is refused from any installed package.
+
+#### The three QML symbols
+
+| Symbol | Direction |
+| --- | --- |
+| `logos.request(intent, params, callback)` | ask for a capability |
+| `logos.respond(requestId, ok, data, error)` | answer one you provide |
+| `intentRequested(requestId, intent, params, requesterName)` | signal: someone asked you |
+
+A provider handles requests like any other signal:
+
+```qml
+Connections {
+    target: logos
+    function onIntentRequested(requestId, intent, params, requesterName) {
+        // Show UI, let the user decide, then answer. Answering later is normal
+        // and expected — you are not obliged to respond synchronously.
+        logos.respond(requestId, true, ({ provider: "my_app" }), "");
+    }
+}
+```
+
+Three properties of the callback worth relying on:
+
+- **Exactly once.** Every request terminates, including timeouts.
+- **Always asynchronous**, even for an immediate failure. No app can come to
+  depend on a synchronous reply.
+- **Real JS values.** `res.data.groupId` works; there is no JSON string to parse.
+
+If you declare `provides` but never connect `intentRequested`, requests to you
+end in `timeout` rather than hanging — the shell counts receivers to detect it.
+
+#### The six error codes
+
+`res.error` is one of exactly six values:
+
+| Code | Meaning |
+| --- | --- |
+| `not_declared` | you did not list this intent in your own `uses` |
+| `unavailable` | no provider could service it |
+| `bad_request` | your `params` were rejected — fix what you sent |
+| `cancelled` | the user dismissed the chooser, or the provider cancelled |
+| `timeout` | a provider was reached but never answered |
+| `failed` | the provider reported a failure |
+
+A provider may only report `cancelled`, `timeout`, `failed` or `bad_request`.
+Anything else it returns is coerced to `failed`. `not_declared` and
+`unavailable` are the shell's alone, because both reveal whether a provider
+exists at all.
+
+`bad_request` is the one code both the shell and a provider can mint, and that
+is deliberate. The shell mints it when `params` cannot cross an app boundary at
+all — nested past eight levels, a string over 64 KB, a `QObject*`, a function.
+A provider mints it when the values are well-formed but unusable: a missing
+required field, an address that is not an address. If only the shell could mint
+it, receiving it would prove no provider was ever consulted, and that is an
+existence oracle of exactly the kind `unavailable` exists to prevent. Because
+both can mint it, the shell's own `bad_request` is held to the same timing floor
+as `unavailable` — you cannot tell from the delay which side rejected you.
+
+The distinction from `failed` is what you should do next. `failed` means the
+world did not cooperate; retrying is reasonable. `bad_request` means you sent
+the wrong thing; retrying unchanged will fail identically. Check the provider's
+`provides[].params` in its `metadata.json` (§8.5) to see the shape it expects.
+
+#### Describing what an intent needs — `provides[].params`
+
+A provider can say what payload it expects, alongside the capability itself:
+
+```json
+"provides": [
+  {
+    "intent": "wallet.send",
+    "params": [
+      { "name": "to",     "type": "string", "required": true,
+        "description": "Destination address" },
+      { "name": "amount", "type": "number", "required": true },
+      { "name": "memo",   "type": "string", "required": false }
+    ]
+  }
+]
+```
+
+`type` is one of `string`, `number`, `bool`, `object`, `array`.
+
+The shell checks the payload against this immediately **before dispatch**, and
+refuses with `bad_request` if a required field is missing or a value has the
+wrong type. The provider never sees a payload it declared unusable.
+
+Three rules worth knowing:
+
+- **Undeclared extra fields pass.** A caller written against a newer version of
+  a provider must not be broken by an older description, and a provider may
+  accept more than it lists.
+- **No `params` means undescribed, not "takes nothing".** Nothing is validated.
+- **Checked after a provider is chosen, never at submit.** Two providers of one
+  intent may describe it differently, so there is no single spec to check at
+  submit time — and testing all of them would reveal how many exist.
+
+This is per-*provider*, not per-*intent*: it describes what one app wants, not
+what the name means. A published registry of intent definitions is the intended
+successor; until then, this is where you look to find out how to call something.
+
+#### When two apps provide the same thing
+
+The shell raises a chooser. What you can rely on as an app author:
+
+- **You never see the list.** Providers are named and drawn entirely by the
+  shell, using the same labels and icons as the sidebar. A requesting app cannot
+  influence how a provider is presented, and a provider cannot dress itself up
+  in the chooser.
+- **The list is sorted**, so the order is stable across runs.
+- **Dismissing gives `cancelled`**, not `unavailable`, so you can distinguish
+  "the user said no" from "there was nobody to ask". Treat `cancelled` as a
+  normal outcome, not an error to report.
+
+The chosen provider is brought to the foreground **and left there.** The shell
+does not navigate back when your request completes; returning is ordinary
+navigation the user drives. Do not write your app expecting to regain focus.
+
+**`unavailable` is deliberately uninformative.** "Nobody provides this" and "you
+were not allowed" are the same answer, delivered on the same timing floor, so an
+app cannot use intents to enumerate what you have installed. Do not build logic
+that tries to tell them apart — instead, let the request fail and let the shell
+handle the fallback.
+
+---
+
 ---
 
 ## Part 9: Advanced Topics
@@ -1182,7 +1774,13 @@ For hands-on walkthroughs of module development patterns, see the dedicated tuto
 
 - **[Wrapping a C Library](tutorial-wrapping-c-library.md)** — create `calc_module` wrapping a vendored C library. Covers external library configuration in `metadata.json`.
 - **[Building a QML UI App](tutorial-qml-ui-app.md)** — create `calc_ui`, a QML-only UI plugin that calls a core module via the `logos.callModule()` bridge.
-- **[Building a C++ UI Module](tutorial-cpp-ui-app.md)** — build `calc_ui_cpp`, a C++ + QML view module that combines a QML frontend with a C++ backend. The backend exposes `Q_INVOKABLE` methods using the generated typed SDK; the QML view calls them via `logos.callModuleAsync()`.
+- **[Building a C++ UI Module](tutorial-cpp-ui-app.md)** — build `calc_ui_cpp`, a `ui_qml` module whose C++ backend runs in a separate `ui-host` process. The remote interface is declared in a `.rep` file, the backend inherits the generated `SimpleSource`, and the QML view reaches it through a typed replica (`logos.module()` + `QtRemoteObjects.watch()`).
+- **[Composing Modules](tutorial-composing-modules.md)** — build `calc_aggregator`, a core module that depends on `calc_module` and exercises every part of `LogosModuleContext`: the injected properties, per-instance persistence, typed sync and async dependency calls, and typed event subscription.
+- **[Dependency Interfaces](tutorial-interface-dependencies.md)** — build `calc_via_interface`, which declares a *contract* rather than a concrete dependency and binds it to a provider chosen at runtime. Its `dependencies` list stays empty. See [Dependency Interfaces](#dependency-interfaces).
+- **[Caller Identity](tutorial-caller-identity.md)** — build a module whose write surface admits one named peer and refuses everything else, reading `logos::currentCaller()`. Covers the five arms, why `unknown` is fail-closed, and the two builds that read it forever.
+- **[Optional Dependencies and the Module Registry](tutorial-modules-state.md)** — build `calc_observer`, which declares its dependencies under `optional_dependencies` and reads the host's own registry through `modules_state`. See [Optional dependencies](#optional-dependencies).
+- **[Concurrent Dispatch](tutorial-concurrent-dispatch.md)** — build a `"concurrency": "multi"` worker and an ordinary driver, and measure the overlap: 4 concurrent calls against `multi`, 1 against `single`. See [§1.6](#16-concurrent-dispatch).
+- **[Writing a Module in Rust](tutorial-rust-module.md)** — build `calc_rust`, a core module written entirely in Rust that consumes the **C++** `calc_module` through the same typed `modules().calc_module` client a C++ consumer gets. Covers Rust-first authoring, the derived `.lidl`, typed events and `Option<T>`.
 
 ### 9.2 Module Dependencies
 
@@ -1205,9 +1803,9 @@ Each module publishes a small, language-neutral **LIDL interface contract** as a
 
 This is the same `logos-cpp-generator` from [§8.2](#82-the-c-sdk-code-generator), just driven by the dependency's LIDL contract — the same kind of `.lidl`/`.h` contract `interface_dependencies` uses — instead of inspecting a compiled plugin. Inspecting a compiled plugin (as §8.2 describes) is the manual/standalone path; for declared module dependencies the builder uses the contract path, which is why no dependency plugin is built.
 
-Because the contract is LIDL, the dependency's implementation language doesn't matter: the pipeline is `source → LIDL → C++` for a C++ module today, and `Rust → LIDL → C++` for a Rust module tomorrow — the same generated `modules().<dep>` wrapper either way.
+Because the contract is LIDL, the dependency's implementation language doesn't matter: the pipeline is `source → LIDL → C++` for a C++ module and `Rust → LIDL → C++` for a Rust one — the same generated `modules().<dep>` wrapper either way. [Writing a Module in Rust](tutorial-rust-module.md) has a Rust module consuming a C++ one, and [Concurrent Dispatch](tutorial-concurrent-dispatch.md) has it the other way round.
 
-> **Transitional fallback.** A dependency built by an older `logos-module-builder` won't expose a `lidl` output yet; for those the builder falls back to the previous behavior (build the dependency and copy its generated headers), so mixed dependency graphs keep working.
+> **There is no fallback.** The builder used to build a dependency and copy its generated headers when it published no `lidl`; that path has been retired. A dependency that publishes no contract is now **refused by name** at eval, before anything is built — quietly building it instead would defeat the point of reading a contract in the first place.
 
 To force a specific contract source for a dependency — a committed `.lidl`, a header in another repo, etc. — add a `dependency_overrides` entry keyed by the dependency name:
 
@@ -1289,6 +1887,69 @@ logoscore --config-dir /tmp/om call openmetrics start '{"port":9090,"modules":["
 curl http://localhost:9090/metrics
 ```
 
+
+### 9.4 Platform-keyed metadata
+
+A module that needs different values per OS or architecture writes **overlays**
+instead of a hand-maintained superset. They are merged before anything else reads
+the metadata, so every consumer sees one already-resolved config.
+
+```json
+"include": [],
+"platforms": [
+  { "when": { "os": "linux" },   "include": ["libcore.so"] },
+  { "when": { "os": "darwin" },  "include": ["libcore.dylib"] },
+  { "when": { "os": "windows" }, "include": ["libcore.dll"] }
+],
+
+"nix": {
+  "packages": { "runtime": ["nlohmann_json"] },
+  "platforms": [
+    { "when": { "os": "linux" }, "packages": { "runtime": ["krb5"] } },
+    { "when": { "architecture": "arm64" }, "cmake": { "extra_link_libraries": ["atomic"] } }
+  ]
+}
+```
+
+Overlays are read from **exactly two places** — the top level and `nix`. Anywhere
+else is a hard error naming the path, rather than an overlay that silently never
+fires. `when` matches on `os`, `architecture` and `abi`; a misspelled selector, and
+a valid-but-unreachable one, both throw at eval.
+
+Merging is: lists **concatenate**, scalars are last-wins, objects recurse, and a
+`null` or a type mismatch is an error.
+
+> **The trap is that lists concatenate.** A value left in the base is *added to*,
+> not replaced. Writing `"include": ["libcore.so"]` in the base and a `darwin`
+> overlay for the `.dylib` gives macOS **both** names. Leave the base empty and put
+> every spelling in an overlay.
+
+Not everything may be overlaid. `name`, `version`, `type`, `interface`, `codegen`,
+`icon`, `view`, `category`, `description`, `concurrency`, `host_services`,
+`interface_dependencies` and `dependency_overrides` are refused on principle — a
+module's identity, its authoring model and its thread-safety obligation must not
+depend on which machine produced the binary.
+
+### 9.5 Finishing before teardown
+
+A module gets one chance to finish work before it is unloaded:
+
+```cpp
+protected:
+    LogosShutdown aboutToUnload() override;
+```
+
+Return **`LogosShutdown::Synchronous`** (the default) to say "already quiescent —
+tear me down now". Return **`LogosShutdown::Asynchronous`** to say "wait for me",
+and call `unloadFinished()` when you are done. The host waits, but only for a
+bounded grace period: a module that asks and never finishes costs a bounded delay
+and is torn down anyway.
+
+> **Do not debug this on stderr.** The subprocess container closes the child's
+> stdout and stderr *before* it sends the stop signal, so anything you print during
+> teardown is never relayed — and a silent probe looks exactly like a hook that
+> never fired. Write to a file instead.
+
 ---
 
 ## Reference: Repository Map
@@ -1353,8 +2014,8 @@ logoscore stop                                # Stop daemon
 ### `logos-cpp-generator` -- SDK Code Generator
 
 ```bash
-logos-cpp-generator <plugin-file> [--output-dir <dir>] [--module-only]
-logos-cpp-generator --metadata <metadata.json> --module-dir <dir> [--output-dir <dir>]
+logos-cpp-generator <plugin-file> [--output-dir <dir>] [--module-only] [--events-from <name>.lidl]
+logos-cpp-generator --metadata <metadata.json> --general-only --dep <name>=<name>.lidl [--output-dir <dir>]
 logos-cpp-generator --metadata <metadata.json> --general-only [--output-dir <dir>]
 ```
 
@@ -1370,6 +2031,31 @@ nix bundle --bundler github:logos-co/nix-bundle-lgx .#lib            # Dev varia
 nix bundle --bundler github:logos-co/nix-bundle-lgx#portable .#lib   # Portable variant
 nix bundle --bundler github:logos-co/nix-bundle-lgx#dual .#lib       # Both variants
 ```
+
+
+## Reference: Flake Outputs
+
+What a module's flake gives you, beyond `nix build`.
+
+| Output | Produces |
+| --- | --- |
+| `.#default` | the plugin plus its generated headers — what `nix build` gives you |
+| `.#lib` | the plugin shared library alone |
+| `.#lidl` | the module's **published contract**. Cheap: no plugin is compiled. This is what consumers generate their typed clients from |
+| `.#generate` | a ready-to-build source tree with every generator already run and `generated_code/` fully populated. Build it from `nix develop` without re-running a generator — and read it when you want to know what your wrapper actually looks like |
+| `.#include` | the generated SDK headers |
+| `.#headers-qt` / `.#headers-lp` | dependency wrappers, Qt-typed and Qt-free respectively |
+| `.#lgx` / `.#lgx-portable` | the signed `.lgx` package, dev and portable variants |
+| `.#install` / `.#install-portable` | build, bundle and install via `lgpm` in one step |
+| `.#unit-tests` | added automatically when `tests/CMakeLists.txt` exists; also a `check` |
+| `.#ui-dev` (`ui_qml`) | `./result/bin/run-logos-standalone-ui` — relaunch and QML edits are picked up with no rebuild |
+| `.#integration-test` (`ui_qml`) | headless UI tests via logos-qt-mcp; also a `check` |
+| `nix run .` (`ui_qml`) | the standalone app, with the plugin and its dependency modules |
+
+Every one of these also exists per system, including the cross target:
+`nix build .#packages.x86_64-windows.lgx-portable`. That target is a
+**pseudo-system** — it evaluates anywhere but only realises on `x86_64-linux`,
+because Windows is cross-built.
 
 ---
 
@@ -1538,3 +2224,19 @@ nix bundle --bundler github:logos-co/nix-bundle-lgx#dual .#lib
 # Then merge platform-specific .lgx files into one:
 ./lgx/bin/lgx merge my_module-linux.lgx my_module-macos.lgx -o my_module.lgx
 ```
+
+**Windows is the exception: it is cross-built, never built natively.** There is no
+Nix daemon for Windows, so "build on the target platform" does not apply. Build
+the `x86_64-windows` target from a Linux machine instead:
+
+```bash
+nix build .#packages.x86_64-windows.lgx-portable
+```
+
+Two consequences worth knowing before you try it:
+
+- The resulting package declares `windows-x86_64`. Because `lgpm` on the builder
+  is a Linux binary, laying that package out on the builder needs the explicit
+  `--platform windows-x86_64` opt-out described in [5.1](#51-the-lgpm-cli).
+- A Windows developer runs the same cross-build inside WSL2 and copies the
+  artifacts out to a Windows path — the toolchain is Linux either way.

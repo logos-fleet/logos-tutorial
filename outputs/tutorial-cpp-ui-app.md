@@ -86,7 +86,7 @@ Create a new directory and initialise it from the C++ backend UI template:
 `mkdir logos-calc-ui-cpp && cd logos-calc-ui-cpp`
 
 ```bash
-nix flake init -t github:logos-co/logos-module-builder/0.2.0#ui-qml-backend
+nix flake init -t github:logos-co/logos-module-builder#ui-qml-backend
 ```
 
 This scaffolds the **universal** UI backend template: a `metadata.json` with `"interface": "universal"`, an example `.rep` (`src/ui_example.rep`), and a single `*Backend` class (`src/ui_example_backend.h` / `.cpp`) — no hand-written interface or plugin files. We'll replace the `ui_example` files with our calculator's `.rep` + backend.
@@ -137,12 +137,12 @@ Replace the template contents with your plugin's details:
 }
 ```
 
-Create the icon directory and add a placeholder icon (displayed in the `logos-basecamp` sidebar when the module is loaded):
+Create the icon directory and add a placeholder icon — a PNG that is exactly 256×256, the only size LGX packaging accepts (displayed in the `logos-basecamp` sidebar when the module is loaded):
 
 ```bash
 mkdir -p icons
-# Copy any PNG here — or generate a 64×64 placeholder:
-echo "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAmElEQVR4nO3QMREAIBDAsFeEN3ziCWRkoEP2XmedfX82OkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAO0BN/SiO/PatoIAAAAASUVORK5CYII=" | base64 -d > icons/calc.png
+# Copy any PNG here — or generate a 256×256 placeholder:
+echo "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAQMAAABmvDolAAAABlBMVEUuzHEuzHEVOa2oAAAAH0lEQVR42u3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAvg0hAAABYOSdlwAAAABJRU5ErkJggg==" | base64 -d > icons/calc.png
 ```
 
 Key fields:
@@ -698,7 +698,7 @@ The template already wires everything up. Update the description and point `calc
   description = "Calculator C++ UI plugin for Logos - QML view with process-isolated backend for calc_module";
 
   inputs = {
-    logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.0";
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
 
     # Points at your local calc_module checkout. This is a placeholder —
     # you lock it to your actual path in the next step with
@@ -794,38 +794,37 @@ Every surface the `.rep` declares is now proven end to end from one click:
 
 ---
 
-## Step 10: Live reloading QML with `DEV_QML_PATH`
+## Step 10: Hot-reloading QML with `nix build .#ui-dev`
 
-For QML iteration, point `DEV_QML_PATH` at the directory that contains your view entry's **basename** (from `metadata.json` `"view"`). This tutorial sets `"view": "qml/Main.qml"`, so the directory must contain `Main.qml` (here: `src/qml/`):
-
-```bash
-DEV_QML_PATH=$PWD/src/qml nix run .
-```
-
-When `DEV_QML_PATH` is set, `logos-standalone-app` loads QML from your source tree at runtime instead of the installed copy — so edits to `Main.qml` (and any QML under that tree) are picked up on the next relaunch without you having to re-sync files.
-
-**Important — what this does *not* skip.** `nix run` always re-evaluates the flake and rehashes the source tree before launching. By default `src = ./.` includes every tracked file, including `*.qml` — so:
-
-- **Any source change, including QML edits, rebuilds the plugin** before the app starts. `DEV_QML_PATH` only kicks in *after* the build is done; it doesn't shortcut the rebuild itself.
-- **C++ / `.rep` / `metadata.json` / CMake changes** rebuild as normal.
-- The flake-evaluation overhead on each `nix run` is fixed and unavoidable while invoking through nix.
-
-For the absolute fastest loop (no nix involvement after the first build), do the build once and run the resulting binary directly:
+For QML iteration, build the dev launcher once. After that, QML edits need no rebuild at all:
 
 ```bash
-# Build once — populates result/ in the nix store
-nix build .
-
-# Subsequent runs: invoke the bundled standalone wrapper directly,
-# skipping nix entirely. DEV_QML_PATH still redirects QML loading.
-DEV_QML_PATH=$PWD/src/qml ./result/bin/run-logos-standalone-ui
+nix build .#ui-dev
+./result/bin/run-logos-standalone-ui
 ```
 
-(Adjust the binary name to whatever `ls result/bin/` shows on your build.)
+Run from the repo root and the launcher finds your QML source automatically, then watches it. Edit a `.qml` file, save, and the view re-renders in about 200 ms. It reports what it picked up on startup:
 
-> **Naming:** Only `DEV_QML_PATH` is honored by `logos-standalone-app`. See `repos/logos-standalone-app/README.md`.
+```
+run-logos-standalone-ui: hot-reloading QML from /path/to/logos-calc-ui-cpp/src/qml
+  (export DEV_QML_PATH to override, or LOGOS_QML_HOT_RELOAD=0 to disable)
+```
 
-> This does not work with `logos-basecamp` — Basecamp loads QML plugins from its own install tree, so source edits are not picked up until you rebuild and reinstall the `.lgx`.
+`ui-dev` is the same wrapper `nix run .` uses — dependency modules bundled and loaded identically — exposed as a package so it lands in `./result/bin`. It is a development target and is never bundled into `.lgx` packages.
+
+**What reloads, and what doesn't.**
+
+- **Any `.qml`/`.js` under your view directory**, including files and folders created after launching.
+- **The backend keeps running.** A module's C++ backend lives in a separate `ui-host` process, so its state and connections survive a reload.
+- **QML-side state resets** — scroll position, text fields, current tab.
+- **A syntax error is recoverable.** It's logged with a line number and the view blanks; the next save that compiles restores it.
+- **C++, `.rep`, `metadata.json` and CMake changes still need a rebuild.** Re-run `nix build .#ui-dev` and relaunch.
+
+**Why not `nix run .`?** It re-evaluates the flake and rehashes the source tree on every invocation. Since `src = ./.` covers every tracked file including `*.qml`, even a one-character QML edit rebuilds the plugin before the app starts. Building `ui-dev` once avoids that entirely.
+
+> **Custom layouts:** the launcher looks for the `view` entry from `metadata.json` under `src/<viewDir>/`, then `<viewDir>/`. If your tree differs, set `DEV_QML_PATH` to the directory holding the entry file and it takes precedence.
+
+> This does not work with `logos-basecamp`. Basecamp loads QML plugins from its own data directory, so source edits are not reflected until you rebuild and reinstall the `.lgx` package.
 
 ---
 
@@ -918,6 +917,49 @@ You declare each pattern in the `.rep` and implement it in your `*Backend` (whic
 | **Model**            | (use Q_PROPERTY on backend)               | `Q_PROPERTY(QAbstractItemModel* items ...)`                               | `logos.model("calc_ui_cpp", "items")`                                      |
 
 The last live row uses the `LogosUiPluginContext` surface — Qt-typed `modules()` callers and event subscriptions armed in `onContextReady()`: `versionEvent` is a PROP fed by the `modules().calc_module.onVersionReady(...)` subscription, and the *Announce version* button drives it. **Model** is the one pattern shown but not built here — for a `QAbstractItemModel*` Q_PROPERTY remoted via `logos.model()`, see [Next Steps](#next-steps).
+
+## Offering a Capability to Other Apps
+
+A `.rep` interface is how *your* QML talks to *your* backend. It is
+private — no other app can see it, and that is deliberate.
+
+When you want another app to be able to use something you do, declare an
+**intent** instead. Unlike a `.rep` method, an intent is addressed by
+capability rather than by app name, so a caller never has to know you
+exist.
+
+In `metadata.json` — entries are **objects**, not strings:
+
+```json
+"provides": [ { "intent": "calc.evaluate" } ]
+```
+
+Handle it in your QML view, exactly like any other signal:
+
+```qml
+Connections {
+    target: logos
+    function onIntentRequested(requestId, intent, params, requesterName) {
+        // Your backend is still reached the normal way — via the replica.
+        // The intent is just how the request arrived.
+        var result = backend.evaluate(params.expression)
+        logos.respond(requestId, true, ({ value: result }), "")
+    }
+}
+```
+
+Answering later is fine and usually right: show whatever UI you need,
+let the user decide, then call `logos.respond`. What you must not do is
+declare `provides` and never connect `intentRequested` — the requester
+then waits out the deadline and gets `timeout`.
+
+Because `provides` is copied into the signed `.lgx` manifest, a catalog
+can see what your package offers before it is installed. `uses` is not
+copied: what you can *do* is public, what you want to *call* is not.
+
+Full API and error codes: [Developer Guide](logos-developer-guide.md)
+§8.5. App-author walkthrough:
+[Intents for App Developers](guide-intents-for-app-developers.md).
 
 ## Next Steps
 

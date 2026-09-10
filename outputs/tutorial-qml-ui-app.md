@@ -47,7 +47,7 @@ Create a new directory and initialise it from the QML module template:
 `mkdir logos-calc-ui && cd logos-calc-ui`
 
 ```bash
-nix flake init -t github:logos-co/logos-module-builder/0.2.0#ui-qml
+nix flake init -t github:logos-co/logos-module-builder#ui-qml
 ```
 
 > **Note:** The generated `flake.nix` uses an unpinned `logos-module-builder` URL. Replace it with the pinned version shown in [Step 4](#step-4-update-flakenix) to ensure reproducible builds.
@@ -102,12 +102,12 @@ Replace the template contents with your plugin's details. The template may gener
 }
 ```
 
-Create the icon directory and add a placeholder icon. The icon is displayed in the `logos-basecamp` sidebar when the module is loaded:
+Create the icon directory and add a placeholder icon. It must be a PNG that is exactly 256×256 — LGX packaging rejects any other size. The icon is displayed in the `logos-basecamp` sidebar when the module is loaded:
 
 ```bash
 mkdir -p icons
-# Copy any PNG here — or generate a 64×64 placeholder:
-echo "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAmElEQVR4nO3QMREAIBDAsFeEN3ziCWRkoEP2XmedfX82OkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAO0BN/SiO/PatoIAAAAASUVORK5CYII=" | base64 -d > icons/calc.png
+# Copy any PNG here — or generate a 256×256 placeholder:
+echo "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAQMAAABmvDolAAAABlBMVEUuzHEuzHEVOa2oAAAAH0lEQVR42u3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAvg0hAAABYOSdlwAAAABJRU5ErkJggg==" | base64 -d > icons/calc.png
 ```
 
 The `view` field tells the host which QML file to load for the UI. The `dependencies` field tells the host to load `calc_module` before showing your UI.
@@ -330,7 +330,7 @@ The template already has everything wired up. Update the description and add `ca
   description = "Calculator QML UI Plugin for Logos - frontend for calc_module";
 
   inputs = {
-    logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.0";
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
 
     # Points at your local calc_module checkout. This is a placeholder —
     # you lock it to your actual path in the next step with
@@ -574,7 +574,7 @@ nix build '.#lgx-portable' --out-link result-lgx-portable
 Build the basecamp desktop shell:
 
 ```bash
-nix build 'github:logos-co/logos-basecamp/0.2.0' -o basecamp-result
+nix build 'github:logos-co/logos-basecamp' -o basecamp-result
 ```
 
 Basecamp manages its own per-user data directory and preinstalls its bundled modules (`main_ui`, `package_manager`, …) from the build. It does **not** accept `--modules-dir` / `--ui-plugins-dir` flags; instead you point it at a data directory with `--user-dir` (or the `LOGOS_USER_DIR` env var), and it reads installed core modules from `<dir>/modules` and UI plugins from `<dir>/plugins` — exactly the directories `lgpm` writes to.
@@ -586,7 +586,7 @@ For this tutorial we use an explicit data directory, `basecamp-data`, so the ins
 `lgpm` installs `.lgx` packages into a modules/plugins directory:
 
 ```bash
-nix build 'github:logos-co/logos-package-manager/0.2.0#cli' --out-link ./pm
+nix build 'github:logos-co/logos-package-manager#cli' --out-link ./pm
 ```
 
 ### 8.4 Create the data directory
@@ -628,15 +628,15 @@ Launch basecamp pointed at that data directory. The `calc_ui` plugin appears in 
 ![calc_module returns 3 + 5 = 8](images/basecamp-calc-installed.png)
 
 The doc comments you wrote on `calc_module`'s methods and events in
-Part 1 also surface in basecamp. Open **Settings → Modules → Core
-Modules**, then open `calc_module`'s **Interface** — each method and
-event shows its `description`.
+Part 1 also surface in basecamp. Open **Settings → Module
+Inspector**, then open `calc_module`'s **Interface** — each method
+and event shows its `description`.
 
 ![Method and event descriptions render (single- and multi-line)](images/basecamp-interface-docs.png)
 
 The result `8` comes back from `calc_module`: pressing **Add** calls `logos.callModule("calc_module", "add", [3, 5])`, which basecamp routes to your core module and back to the QML view. Both modules — the `calc_module` core plugin and the `calc_ui` view plugin — are loaded from the `basecamp-data` directory you installed them into.
 
-The **Interface** screen (Settings → Modules → Core Modules → *Interface*) lists every method **and event** with the `description` from its doc comment — the same docs `lm` and `logoscore module-info` showed in Part 1, here in the GUI. Multi-line `///` comments render as multiple lines, exactly as written.
+The **Interface** screen (Settings → Module Inspector → *Interface*) lists every method **and event** with the `description` from its doc comment — the same docs `lm` and `logoscore module-info` showed in Part 1, here in the GUI. Multi-line `///` comments render as multiple lines, exactly as written.
 
 The sidebar labels each UI plugin by its `name` from `metadata.json`, which is why the tab reads `calc_ui`.
 
@@ -645,7 +645,7 @@ The sidebar labels each UI plugin by its `name` from `metadata.json`, which is w
 The dev build above depends on nix store paths at runtime. For a self-contained portable build that works without nix:
 
 ```bash
-nix build 'github:logos-co/logos-basecamp/0.2.0#bin-bundle-dir' -o basecamp-portable
+nix build 'github:logos-co/logos-basecamp#bin-bundle-dir' -o basecamp-portable
 ```
 
 ```bash
@@ -692,38 +692,37 @@ Instead of using `lgpm` on the command line, you can install modules through the
 
 A `calc_ui` tab appears in the sidebar (UI plugins are labelled by their `name` from `metadata.json`). Clicking it loads your `Main.qml`.
 
-### 8.10 Live reloading with `logos-standalone-app`
+### 8.10 Hot-reloading QML with `nix build .#ui-dev`
 
-For QML iteration, set `DEV_QML_PATH` to the directory that contains your view entry file (the basename from `metadata.json` `view` must exist under that directory). For this tutorial's layout (`view`: `Main.qml` at repo root):
-
-```bash
-DEV_QML_PATH=$PWD nix run .
-```
-
-When `DEV_QML_PATH` is set, `logos-standalone-app` loads QML from your source tree at runtime instead of the installed copy — so edits in `Main.qml` are picked up on the next relaunch without you having to manually re-sync files.
-
-**Important — what this does *not* skip.** `nix run` always re-evaluates the flake and rehashes the source tree before launching. By default `src = ./.` includes every tracked file, including `*.qml` — so:
-
-- **Any source change, including QML edits, rebuilds the plugin** before the app starts. `DEV_QML_PATH` only kicks in *after* the build is done; it doesn't shortcut the rebuild itself.
-- **C++ / `.rep` / `metadata.json` / CMake changes** rebuild as normal.
-- The flake-evaluation overhead on each `nix run` is fixed and unavoidable while invoking through nix.
-
-For the absolute fastest loop (no nix involvement after the first build), do the build once and run the resulting binary directly:
+For QML iteration, build the dev launcher once. After that, QML edits need no rebuild at all:
 
 ```bash
-# Build once — populates result/ in the nix store
-nix build .
-
-# Subsequent runs: invoke the bundled standalone wrapper directly,
-# skipping nix entirely. DEV_QML_PATH still redirects QML loading.
-DEV_QML_PATH=$PWD ./result/bin/run-logos-standalone-ui
+nix build .#ui-dev
+./result/bin/run-logos-standalone-ui
 ```
 
-(Adjust the binary name to whatever `ls result/bin/` shows on your build.)
+Run from the repo root and the launcher finds your QML source automatically, then watches it. Edit a `.qml` file, save, and the view re-renders in about 200 ms. It reports what it picked up on startup:
 
-> **Naming:** Only `DEV_QML_PATH` is honored. See `repos/logos-standalone-app/README.md`.
+```
+run-logos-standalone-ui: hot-reloading QML from /path/to/logos-calc-ui
+  (export DEV_QML_PATH to override, or LOGOS_QML_HOT_RELOAD=0 to disable)
+```
 
-> This does not work with `logos-basecamp`. Basecamp loads QML plugins from its own data directory, so changes to your source files are not reflected until you rebuild and reinstall the `.lgx` package.
+`ui-dev` is the same wrapper `nix run .` uses — dependency modules bundled and loaded identically — exposed as a package so it lands in `./result/bin`. It is a development target and is never bundled into `.lgx` packages.
+
+**What reloads, and what doesn't.**
+
+- **Any `.qml`/`.js` under your view directory**, including files and folders created after launching.
+- **The backend keeps running.** A module's C++ backend lives in a separate `ui-host` process, so its state and connections survive a reload.
+- **QML-side state resets** — scroll position, text fields, current tab.
+- **A syntax error is recoverable.** It's logged with a line number and the view blanks; the next save that compiles restores it.
+- **C++, `.rep`, `metadata.json` and CMake changes still need a rebuild.** Re-run `nix build .#ui-dev` and relaunch.
+
+**Why not `nix run .`?** It re-evaluates the flake and rehashes the source tree on every invocation. Since `src = ./.` covers every tracked file including `*.qml`, even a one-character QML edit rebuilds the plugin before the app starts. Building `ui-dev` once avoids that entirely.
+
+> **Custom layouts:** the launcher looks for the `view` entry from `metadata.json` under `src/<viewDir>/`, then `<viewDir>/`. If your tree differs, set `DEV_QML_PATH` to the directory holding the entry file and it takes precedence.
+
+> This does not work with `logos-basecamp`. Basecamp loads QML plugins from its own data directory, so source edits are not reflected until you rebuild and reinstall the `.lgx` package.
 
 ### 8.11 Testing without any runtime
 
@@ -824,6 +823,65 @@ node tests/ui-tests.mjs  # in another terminal
 ```
 
 ---
+
+## Calling Another App
+
+`logos.callModule()` calls a module you name. Sometimes you want a
+**capability** instead — "somebody sign this", "somebody open this chat" —
+without knowing or caring which app provides it. That is an *intent*.
+
+### Requesting
+
+Declare what you may ask for in `metadata.json`. Entries are **objects**,
+not strings:
+
+```json
+"uses": [ { "intent": "calc.history.show" } ]
+```
+
+Then ask:
+
+```qml
+logos.request("calc.history.show", { last: 10 }, function (res) {
+    if (res.ok) console.log("shown by", res.data.provider)
+    else        console.log("failed:", res.error)
+})
+```
+
+You may only request intents you declared — an undeclared request comes
+back `not_declared`. The callback fires exactly once and always
+asynchronously, and `res.data` is a real JS object, not a JSON string.
+
+### Providing
+
+```json
+"provides": [ { "intent": "calc.history.show" } ]
+```
+
+```qml
+Connections {
+    target: logos
+    function onIntentRequested(requestId, intent, params, requesterName) {
+        // Show whatever UI you need, then answer. Answering later is
+        // normal — you are not obliged to respond synchronously.
+        logos.respond(requestId, true, ({ provider: "calc_ui" }), "")
+    }
+}
+```
+
+Declaring `provides` without connecting `intentRequested` is the one
+mistake that looks like a hang: the requester waits out the deadline and
+gets `timeout`.
+
+> **Watch the shape.** `"uses": ["calc.history.show"]` — a bare string
+> array — is silently ignored, and the request then fails `not_declared`
+> with nothing pointing at the manifest. Objects, always. Check the shell
+> log for `IntentRegistry:` lines, which name every declaration it skipped.
+
+If more than one installed app provides the same intent, the shell asks
+the user which to use and remembers the answer if they tick the box. You
+never see that list and cannot influence it — see
+[Intents for App Developers](guide-intents-for-app-developers.md).
 
 ## Known Limitations
 
