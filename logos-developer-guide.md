@@ -414,17 +414,41 @@ own copy, so it tracks the ABI as it grows — you do not need to memorise the
 list above. `type: ui_qml` backends and hand-written Qt (`interface: legacy`)
 modules have no protocol-free form and expose no `bare` output at all.
 
-The mobile variants above are the same artifact for another target — same
-sources, same gate — plus one more gate on Android: a `DT_NEEDED` soname the
-app does not ship and Android does not guarantee fails the build rather than
-the phone. Link such a library into the module (static) or ship it beside the
-`.so`. Two notes on realising them:
+The same artifact is what a phone loads, cross-built:
 
-- an Android derivation's `system` is its BUILD platform, so
-  `packages.aarch64-android.*` is pinned to `x86_64-linux`; on a Mac ask for
-  `mobileBarePackagesFor { androidBuildSystem = "aarch64-darwin"; }` instead;
-- the iOS variants need Xcode on the machine (they are `__noChroot`
-  derivations, see logos-nix ADR 0002), so only macOS can produce them.
+```bash
+nix build .#packages.aarch64-ios.bare            # iPhone / iPad
+nix build .#packages.aarch64-ios-simulator.bare  # the simulator
+nix build .#packages.aarch64-android.bare        # arm64-v8a
+```
+
+Each of those keys carries `bare` and nothing else — there is no Qt plugin host
+on a phone, which is the reason the Bare module exists. The artifact takes the
+shape the platform's loader demands: on iOS a flat embedded framework
+(`Library/Frameworks/<name>_bare.framework/`) with an `Info.plist` and an
+`@rpath/<name>_bare.framework/<name>_bare` install_name, for an app to copy into
+`<App>.app/Frameworks/` with Code Sign On Copy; on Android
+`lib/lib<name>_bare.so`, because an APK carries only `lib*.so`. On Android it
+also records `NEEDED liblogos_protocol.so`, which is the only way bionic lets a
+`dlopen`'d image reach an app library's symbols — `lp_*` stays undefined either
+way.
+
+Android gets one gate more than the desktop build: a `DT_NEEDED` soname the app
+does not ship and Android does not guarantee fails the build rather than the
+phone (where it arrives as an `UnsatisfiedLinkError` naming one soname and none
+of the reason). Link such a library into the module statically, or ship it
+beside the `.so`.
+
+A `codegen.rust` core crosses like the C++ one — the crate is recompiled for the
+target and staged over the build-platform archive `generate` left in `lib/`, so
+nothing about authoring changes. Two limits remain: a module declaring
+`nix.external_libraries` is refused a mobile bare by name (those images come
+from their own flakes, which have to publish a package for the target), as is a
+Go core; and `packages.aarch64-android` is built from logos-nix's canonical
+Android build platform, so on a Mac use
+`legacyPackages.aarch64-darwin.mobile.aarch64-android.bare` instead. The iOS
+keys need Xcode on the machine (they are `__noChroot` derivations, logos-nix
+ADR 0002), so only macOS produces them at all.
 
 ---
 
