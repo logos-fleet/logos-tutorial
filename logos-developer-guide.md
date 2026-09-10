@@ -389,15 +389,23 @@ result/
 ```
 
 The **Bare module** is the protocol-free shape of the same module: it exports
-the common module-impl C ABI (`logos_module_dispatch`,
+the whole common module-impl C ABI — every symbol logos-protocol declares in
+`cpp/logos_module_impl.h`, which at protocol 0.9 is `logos_module_dispatch`,
 `logos_module_get_methods`, `logos_module_set_context`,
-`logos_module_set_emit_callback`, `logos_module_accept_token`,
-`logos_module_get_protocol_version`, `logos_module_string_free`) and leaves the
-logos-protocol consumer ABI (`lp_*`) **undefined** for the host image to supply
-at load time — no Qt, no generated Qt-plugin glue, no logos-protocol archive.
+`logos_module_set_emit_callback`, `logos_module_set_call_caller`,
+`logos_module_accept_token`, `logos_module_accept_inbound_token`,
+`logos_module_grant_host_services`, `logos_module_get_protocol_version`,
+`logos_module_about_to_unload`, `logos_module_set_unload_done_callback` and
+`logos_module_string_free` — and leaves the logos-protocol consumer ABI (`lp_*`)
+**undefined** for the host image to supply at load time: no Qt, no generated
+Qt-plugin glue, no logos-protocol archive.
+
 The build gates it: if the linker disagrees, the derivation fails and names the
-offending symbol or library. `type: ui_qml` backends and hand-written Qt modules
-have no protocol-free form and expose no `bare` output.
+offending symbol or library. The gate reads the required export list from
+logos-protocol's published `module-impl-abi/exports.txt` rather than keeping its
+own copy, so it tracks the ABI as it grows — you do not need to memorise the
+list above. `type: ui_qml` backends and hand-written Qt (`interface: legacy`)
+modules have no protocol-free form and expose no `bare` output at all.
 
 ---
 
