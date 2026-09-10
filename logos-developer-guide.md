@@ -363,6 +363,13 @@ nix build .#generate
 # `interface: "cdylib"` and core `interface: "universal"` modules.
 nix build .#bare
 
+# The same artifact for a phone. A Bare module carries no Qt, so it is the one
+# module output that cross-compiles: arm64 iOS (device and simulator) and
+# arm64-v8a Android, API 28.
+nix build .#packages.aarch64-ios.bare
+nix build .#packages.aarch64-ios-simulator.bare
+nix build .#packages.aarch64-android.bare
+
 # Enter the dev shell for manual CMake builds (see: https://nix.dev/tutorials/first-steps/dev-environment)
 # The shell provides cmake, ninja, Qt, the Logos SDK, and all build dependencies.
 nix develop
@@ -406,6 +413,18 @@ logos-protocol's published `module-impl-abi/exports.txt` rather than keeping its
 own copy, so it tracks the ABI as it grows — you do not need to memorise the
 list above. `type: ui_qml` backends and hand-written Qt (`interface: legacy`)
 modules have no protocol-free form and expose no `bare` output at all.
+
+The mobile variants above are the same artifact for another target — same
+sources, same gate — plus one more gate on Android: a `DT_NEEDED` soname the
+app does not ship and Android does not guarantee fails the build rather than
+the phone. Link such a library into the module (static) or ship it beside the
+`.so`. Two notes on realising them:
+
+- an Android derivation's `system` is its BUILD platform, so
+  `packages.aarch64-android.*` is pinned to `x86_64-linux`; on a Mac ask for
+  `mobileBarePackagesFor { androidBuildSystem = "aarch64-darwin"; }` instead;
+- the iOS variants need Xcode on the machine (they are `__noChroot`
+  derivations, see logos-nix ADR 0002), so only macOS can produce them.
 
 ---
 
