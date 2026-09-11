@@ -370,6 +370,11 @@ nix build .#packages.aarch64-ios.bare
 nix build .#packages.aarch64-ios-simulator.bare
 nix build .#packages.aarch64-android.bare
 
+# The same module compiled to WebAssembly, with logos-protocol's web transport
+# linked in and a loader page around it: an LGX `web` variant that runs in a Web
+# Worker inside a webview. Same admission rule as `bare`.
+nix build .#web
+
 # Enter the dev shell for manual CMake builds (see: https://nix.dev/tutorials/first-steps/dev-environment)
 # The shell provides cmake, ninja, Qt, the Logos SDK, and all build dependencies.
 nix develop
@@ -438,6 +443,61 @@ does not ship and Android does not guarantee fails the build rather than the
 phone (where it arrives as an `UnsatisfiedLinkError` naming one soname and none
 of the reason). Link such a library into the module statically, or ship it
 beside the `.so`.
+
+### The `web` variant — the same module in a Worker
+
+```bash
+nix build .#web
+```
+
+```
+result/
+└── <name>_web/
+    ├── manifest.json          # main = index.html
+    ├── index.html             # the loader page: spawns the Worker, relays frames
+    ├── logos-wasm-worker.js   # the Worker: emscripten glue in, message port out
+    ├── <name>_wasm.js         # THE WASM HOST (the image base64-embedded)
+    ├── <name>_wasm_image.wasm # the image on its own, for weighing and inspection
+    └── wasm-host.json         # what the build measured
+```
+
+The Bare artifact and the `web` variant are the two ends of one idea, and the
+difference is one line of linking. A module with no Qt in it and no protocol
+linked can be given **any** host. On a phone the host is the app's own image, so
+`bare` leaves `lp_*` undefined for it to supply. In a webview there is no
+`dlopen` and no host to `dlopen` *into* — the App Store permits an interpreter
+running downloaded code but not downloaded executables — so the host is compiled
+into the same image: the module, logos-protocol's web transport and a small
+relay are one wasm executable.
+
+It runs in a Web **Worker**, not on the page thread. Dispatch is synchronous
+C++, and on a phone the page thread is the host app's UI thread; the Worker is
+also a failure boundary, so an image that traps takes down the Worker while the
+page survives to report it.
+
+Nothing in the Web container is wasm-aware. It opens `main` in a webview and
+relays the web transport across its bridge exactly as it does for a page written
+in JavaScript — which is why the same variant runs behind a `WKWebView`.
+
+Run it on the desktop with the Web container:
+
+```bash
+# The variant, laid out as a modules directory (this is what lgpm installs)
+mkdir -p modules/my_module && cp result/my_module_web/* modules/my_module/
+
+export LOGOSCORE_WEBHOST=$(nix build --no-link --print-out-paths \
+    github:logos-co/logos-logoscore-cli#webhost)/bin/logoscore-webhost
+logoscore -D --modules-dir "$PWD/modules" --container web
+logoscore load-module my_module
+logoscore call my_module add 1 2          # -> 3
+```
+
+The page logs the image's size and its cold instantiate time when it starts
+serving, and the daemon captures it:
+
+```
+[logos-wasm my_module] serving; wasm 197839 bytes, cold instantiate 0.9 ms, protocol 0.10.2
+```
 
 A `codegen.rust` core crosses like the C++ one — the crate is recompiled for the
 target and staged over the build-platform archive `generate` left in `lib/`, so
