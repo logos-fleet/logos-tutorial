@@ -499,6 +499,38 @@ serving, and the daemon captures it:
 [logos-wasm my_module] serving; wasm 197839 bytes, cold instantiate 0.9 ms, protocol 0.10.2
 ```
 
+**A panic is a module failure, not a page crash.** A trap inside the image — a
+Rust panic, an `abort()`, an out-of-bounds — kills the Worker; the page survives
+it, names it on the console and closes its channel, and the host reports the
+module dead at once rather than waiting out an introspection timeout. Nothing
+else in the process is touched.
+
+```
+logoscore-webhost: [error] my_module:0 [logos-wasm my_module] the image trapped:
+                   RuntimeError: unreachable
+logoscore-webhost: my_module closed its channel; it is no longer serving
+logoscore call my_module add 1 2          # -> {"status":"error", ... "not loaded"}
+logoscore load-module my_module           # -> back, with a fresh image
+```
+
+The reload can be the host's job instead of yours. liblogos has a supervision
+policy — off by default, set by `logos_core_set_supervision_policy()` or by
+`LOGOS_SUPERVISION=max[,windowMs[,backoffMs]]` in the environment — and under one
+a module that died without being asked to is loaded again, up to `max` times
+inside the window, and left down past that with the reason logged.
+
+```bash
+LOGOS_SUPERVISION=3 logoscore -D --modules-dir "$PWD/modules" --container web
+# [warning] Module my_module exited without being asked to; loading it again
+#           in 500 ms (restart 1 of 3)
+```
+
+Off by default because a restart is only honest when the module has nothing to
+lose: a subprocess module that segfaulted took its state with it. A Wasm host
+keeps none outside its own linear memory, so a fresh image is a complete
+recovery — which is why the `web` variant is the first artifact this policy was
+written for.
+
 A `codegen.rust` core crosses like the C++ one — the crate is recompiled for the
 target and staged over the build-platform archive `generate` left in `lib/`, so
 nothing about authoring changes.
