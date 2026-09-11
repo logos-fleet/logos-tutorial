@@ -501,11 +501,45 @@ serving, and the daemon captures it:
 
 A `codegen.rust` core crosses like the C++ one — the crate is recompiled for the
 target and staged over the build-platform archive `generate` left in `lib/`, so
-nothing about authoring changes. What does not cross is refused by name at eval
-rather than left to the linker:
+nothing about authoring changes.
 
-- a module declaring `nix.external_libraries`. Those images come from their own
-  flakes, which have to publish a package for the target;
+**An external library crosses when its consumer says how.** `generate` staged
+each `nix.external_libraries` entry into `lib/` as a build-platform image, and
+nothing in the builder can recompile one — it comes from its own flake, which
+answers for desktop systems and has never heard of a phone. So the module's own
+flake answers, per target, with `mobilePackages` on the `externalLibInputs`
+entry:
+
+```nix
+externalLibInputs.mylib = {
+  input = inputs.mylib;                # the native half, unchanged
+  packages.default = "mylib";
+  # { system, pkgs, buildSystem } -> a derivation laid out lib/ + include/,
+  # or null to decline that target.
+  mobilePackages = { system, pkgs, buildSystem }:
+    import ./nix/mobile-mylib.nix { inherit pkgs; target = system; };
+};
+```
+
+A function rather than an attrset keyed by system: `pkgs` is the target package
+set the bare build is already using, and for Android its BUILD platform is a
+parameter. The result is staged OVER the build-platform image, which is deleted
+first — `_logos_find_external_lib` prefers a shared library to a static one, so
+a surviving `.dylib` would keep winning. Build a STATIC archive: a Bare module
+on a phone carries every third-party library inside its own image, and on
+Android a library beside the `.so` is an unbundled soname. Two worked examples,
+both nim plus vendored C merged into one archive:
+`logos-libp2p-module/nix/mobile-cbind.nix` and
+`logos-delivery-module/nix/mobile-libs.nix` (that one also cross-builds a Rust
+crate and merges it in, because only the library named in `EXTERNAL_LIBS` is
+linked and a static link has no load time at which a transitive dependency
+could resolve).
+
+What still does not cross is refused by name at eval rather than left to the
+linker:
+
+- an `nix.external_libraries` entry with **no `mobilePackages` build** for the
+  target;
 - a Go core, for the same reason with no cross toolchain wired in.
 
 Which machine builds which key is a separate matter. The iOS keys need Xcode
@@ -560,8 +594,9 @@ or `LogosAPI` symbol, a Qt library in the load commands, or a missing
 
 Two refusals, both at eval: a **QML-only** `ui_qml` module (no `main`) has no
 backend to compile — its QML travels in the module's LGX; and a module
-declaring `nix.external_libraries` is refused for the same reason the Bare
-output refuses it. **Android has no `view` key at all**: Qt there is a set of
+declaring `nix.external_libraries` is refused outright. The Bare output takes a
+`mobilePackages` hand-off for those; the `view` output has no such hand-off
+yet. **Android has no `view` key at all**: Qt there is a set of
 shared objects, so the same module is a `.so` naming them in `DT_NEEDED` — a
 different artifact with a different gate.
 
