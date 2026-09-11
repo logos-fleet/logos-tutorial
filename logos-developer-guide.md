@@ -454,6 +454,57 @@ them at all; `packages.aarch64-android` is built from logos-nix's canonical
 Android build platform, so on a Mac use
 `legacyPackages.aarch64-darwin.mobile.aarch64-android.bare` instead.
 
+#### A `ui_qml` module on iOS — the `view` output
+
+A view module is the one shape that cannot be a Bare module: it IS a Qt object,
+so there is nothing protocol-free to extract, and `.#bare` is absent from it on
+every key. It has its own mobile artifact instead:
+
+```bash
+nix build .#packages.aarch64-ios.view            # iPhone / iPad
+nix build .#packages.aarch64-ios-simulator.view  # the simulator
+```
+
+One embedded framework
+(`Library/Frameworks/<name>_view.framework/`) carrying the module's compiled Qt
+backend, the typed source **and** replica of its `.rep`, and its QML inside the
+image's own `qrc`. Nothing is linked into it: Qt, `LogosAPI` and `lp_*` are all
+left undefined and resolve upward into the app image at `dlopen`, exactly as a
+Bare module's `lp_*` do. So the module is full of Qt and carries none of it —
+one QtCore in the process, which is the whole rule.
+
+Nothing about authoring changes. The same `metadata.json`, the same `.rep`, the
+same `Main.qml`: on the desktop the backend runs in a `ui-host` subprocess and
+the QML talks to a typed replica over a socket, and on a phone (where no store
+allows that subprocess) the host holds the backend itself and carries the same
+typed replica over a node in the same process. The QML cannot tell.
+
+The host reaches the framework through six C entry points and nothing else —
+`<App>.app/Frameworks/` is flat and read-only, so there is no plugin directory
+to scan:
+
+| symbol | answers |
+|---|---|
+| `logos_view_module_abi_version()` | `1` today; a host refuses a number it does not know |
+| `logos_view_module_name()` / `_version()` | the module's identity |
+| `logos_view_module_qml_url()` | `qrc:/logos/<name>/<entry>` — inside this image |
+| `logos_view_module_create()` | the plugin object, cast to `LogosViewPlugin` |
+| `logos_view_module_acquire_replica(node)` | the typed replica |
+| `qt_plugin_instance()` | Qt's own, emitted by moc |
+
+Every `view` build runs `scripts/logos-view-gate.sh` over its artifact: a
+missing entry point, a QtCore symbol DEFINED in the image (or none of them
+undefined), a Qt symbol exported beyond the module's own edge, a defined `lp_*`
+or `LogosAPI` symbol, a Qt library in the load commands, or a missing
+`qrc:/logos/...` URL each fail the build rather than the phone.
+
+Two refusals, both at eval: a **QML-only** `ui_qml` module (no `main`) has no
+backend to compile — its QML travels in the module's LGX; and a module
+declaring `nix.external_libraries` is refused for the same reason the Bare
+output refuses it. **Android has no `view` key at all**: Qt there is a set of
+shared objects, so the same module is a `.so` naming them in `DT_NEEDED` — a
+different artifact with a different gate.
+
 ---
 
 ### 1.6 Concurrent dispatch
