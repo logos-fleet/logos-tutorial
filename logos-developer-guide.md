@@ -1118,6 +1118,10 @@ means the same thing at packaging time, at install time and at build time.
 | Mobile | `android-arm64` `android-x86_64` `ios-arm64` `ios-sim-arm64` |
 | Web container | `web` |
 
+(The canonical list also carries `linux-x86`, `windows-x86` and
+`ios-sim-x86_64`, which a host can still compute a name for; nothing builds for
+them.)
+
 Four rules, all of them things that bite if you assume otherwise:
 
 - **`amd64` / `aarch64` are accepted wherever `x86_64` / `arm64` are.** The two
