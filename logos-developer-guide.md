@@ -27,15 +27,18 @@ A comprehensive guide to creating, building, testing, packaging, and distributin
 - [Part 4: Packaging Your Module](#part-4-packaging-your-module)
   - [4.1 The LGX Package Format](#41-the-lgx-package-format)
   - [4.2 Building LGX Packages](#42-building-lgx-packages)
+  - [4.3 The variant vocabulary](#43-the-variant-vocabulary)
 - [Part 5: Installing and Managing Modules](#part-5-installing-and-managing-modules)
   - [5.1 The `lgpm` CLI](#51-the-lgpm-cli)
   - [5.2 Installing from Local Files](#52-installing-from-local-files)
   - [5.3 Downloading and Installing from a Registry](#53-downloading-and-installing-from-a-registry)
 - [Part 6: Running Your Module](#part-6-running-your-module)
   - [6.1 Running with `logoscore`](#61-running-with-logoscore)
+  - [6.2 Which container runs your module — `--container`](#62-which-container-runs-your-module----container)
 - [Part 7: Running in logos-basecamp](#part-7-running-in-logos-basecamp)
   - [7.1 Building logos-basecamp](#71-building-logos-basecamp)
   - [7.2 Module Types in logos-basecamp](#72-module-types-in-logos-basecamp)
+  - [7.3 On a phone: the Bundled set](#73-on-a-phone-the-bundled-set)
 - [Part 8: Inter-Module Communication](#part-8-inter-module-communication)
   - [8.1 The LogosAPI](#81-the-logosapi)
   - [8.2 The C++ SDK Code Generator](#82-the-c-sdk-code-generator)
@@ -1102,6 +1105,55 @@ This produces a `my_module-<version>.lgx` file in the current directory.
 
 > **Windows is cross-built only.** `x86_64-windows` is a pseudo-system: there is no Nix daemon for Windows, so the package is produced on a Linux (or macOS) machine targeting `x86_64-w64-mingw32` and copied across. Note the variant is spelled `windows-x86_64`, not `windows-amd64` — unlike Linux, it has no alias, so a package labelled `windows-amd64` will not install.
 
+### 4.3 The variant vocabulary
+
+A variant name says what a package's bytes can be loaded into. There is **one**
+list of them, defined in logos-package (`src/core/platform_variant.cpp`) and
+used unchanged by `lgx`, `lgpm`, `lgpd` and the Store-shell build — so a name
+means the same thing at packaging time, at install time and at build time.
+
+| | |
+|---|---|
+| Desktop | `linux-x86_64` `linux-arm64` `darwin-x86_64` `darwin-arm64` `windows-x86_64` `windows-arm64` |
+| Mobile | `android-arm64` `android-x86_64` `ios-arm64` `ios-sim-arm64` |
+| Web container | `web` |
+
+Four rules, all of them things that bite if you assume otherwise:
+
+- **`amd64` / `aarch64` are accepted wherever `x86_64` / `arm64` are.** The two
+  spellings name the same variant; a host tries its own name first, then the
+  other spelling of its architecture, and stops.
+- **A consumer built against the Nix store looks for the `-dev` flavour**
+  (`darwin-arm64-dev`), a portable one for the plain name. That is the
+  [variant mismatch](#lgx-variant-mismatch) in §4.2, spelled out.
+- **Nothing falls back across a platform line.** `ios-sim-arm64` is not
+  `ios-arm64` — same chip, different ABI — `android-arm64` is not
+  `linux-arm64`, and no native host ever falls back to `web`. A phone with no
+  `web` variant on offer shows the module as unavailable rather than
+  installing something it cannot run.
+- **A misspelling is refused with the name that was meant**, because the
+  package it would produce installs nowhere:
+
+  ```bash
+  $ lgx add mymodule.lgx -v ios_arm64 -f ./MyModule.framework -m MyModule
+  Error: Unknown variant 'ios_arm64': did you mean 'ios-arm64'?
+  ```
+
+Which variant each build output becomes:
+
+| Output | Variant |
+| --- | --- |
+| `nix build .#lgx` / `.#lgx-portable` | this host's desktop name, `-dev` or plain |
+| `nix build .#packages.aarch64-ios.bare` | `ios-arm64` |
+| `nix build .#packages.aarch64-ios-simulator.bare` | `ios-sim-arm64` |
+| `nix build .#packages.aarch64-android.bare` | `android-arm64` |
+| `nix build .#web` | `web` |
+
+One package carries as many of these as you built; `lgx add` puts each under
+its own key and the signature covers all of them at once, so publishing is one
+step no matter how many platforms you reached. `lgx manifest mymodule.lgx`
+lists the keys a package actually has.
+
 ---
 
 ## Part 5: Installing and Managing Modules
@@ -1321,6 +1373,90 @@ until ./logos/bin/logoscore status >/dev/null 2>&1; do sleep 0.2; done
 | `stats`                         | Show module resource usage       |
 | `stop`                          | Stop the daemon                  |
 
+### 6.2 Which container runs your module — `--container`
+
+Your module's **artifact** decides which container runs it. A Qt plugin runs in
+a `logos_host` subprocess; a Bare module (`nix build .#bare`) runs in-process in
+the **Native container**; a `web` variant (`nix build .#web`, or any package
+whose `main` is an `.html` document) runs in a webview in the **Web container**.
+Nothing you pass on the command line turns one into another.
+
+`--container` is therefore an **assertion**, not a switch:
+
+```
+--container <auto|inproc|subprocess|web>
+```
+
+`auto` is the default and asserts nothing. Any other value says "every module
+in this daemon must be that shape", and a module that is not is refused at load
+rather than quietly run somewhere else. That is what makes it useful in a test:
+without it, a run that was supposed to exercise the Native container and
+silently subprocessed everything looks exactly like a run that worked.
+
+**Your Bare module, in-process.** `nix build .#bare` produces the image; what
+discovery scans is the directory layout `lgpm` installs, so lay it out:
+
+```bash
+nix build .#bare
+mkdir -p modules/my_module
+cp result/lib/my_module_bare.* modules/my_module/      # .so on Linux, .dylib on macOS
+cat > modules/my_module/manifest.json <<'EOF'
+{ "name": "my_module", "version": "1.0.0", "type": "core",
+  "main": "my_module_bare.dylib", "dependencies": [] }
+EOF
+
+logoscore -D --modules-dir "$PWD/modules" --container inproc
+logoscore load-module my_module
+logoscore call my_module add 1 2          # -> 3
+```
+
+`main` as a plain string is variant-agnostic and is the right form for a
+hand-made directory; a real `.lgx` carries the
+[variant-keyed](#43-the-variant-vocabulary) form instead, and `lgpm install`
+writes that.
+
+The startup banner says which policy it is holding, which is the line a CI job
+greps for:
+
+```
+[info] Container policy: inproc
+```
+
+**Your `web` variant, in a webview:** `logoscore` links no browser — a headless
+CLI has no business carrying Chromium — so the page runs in a separate
+`logoscore-webhost` process the daemon starts per module and speaks the web
+transport to over a loopback socket. Name it with `LOGOSCORE_WEBHOST`:
+
+```bash
+export LOGOSCORE_WEBHOST=$(nix build --no-link --print-out-paths \
+    github:logos-co/logos-logoscore-cli#webhost)/bin/logoscore-webhost
+logoscore -D --modules-dir "$PWD/modules" --container web
+logoscore load-module my_module
+logoscore call my_module add 1 2          # -> 3
+```
+
+With no `LOGOSCORE_WEBHOST` set, the daemon looks for `logoscore-webhost`
+beside itself; with neither, a `web` module reports the missing bridge by name
+at load and nothing else changes.
+
+That separation is also what makes a dead page survivable: the host sees the
+socket close, marks the module dead, and leaves every other module running. See
+[§1.5's `web` variant section](#the-web-variant--the-same-module-in-a-worker)
+for what a trap inside the image looks like and for `LOGOS_SUPERVISION`.
+
+**Both containers are exercised in CI**, on the same seam you just used:
+`logos-test-modules`' `ipc-new-api-inproc-tests` check runs the IPC suite
+against Bare modules under `--container inproc`, and
+`logos-logoscore-cli`'s `web-container` check runs a page end to end under
+`--container web`. Either is one command:
+
+```bash
+nix build github:logos-co/logos-test-modules#checks.$(nix eval --raw --impure \
+    --expr builtins.currentSystem).ipc-new-api-inproc-tests -L
+nix build github:logos-co/logos-logoscore-cli#checks.$(nix eval --raw --impure \
+    --expr builtins.currentSystem).web-container -L
+```
+
 ---
 
 ## Part 7: Running in logos-basecamp
@@ -1414,6 +1550,69 @@ These have `"type": "ui_qml"` with `"view"` but no `"main"` — pure QML, no C++
 - Network access denied, filesystem restricted to module directory
 - Scaffold: `nix flake init -t github:logos-co/logos-module-builder#ui-qml`
 - See [Tutorial Part 2](tutorial-qml-ui-app.md) for a complete walkthrough
+
+### 7.3 On a phone: the Bundled set
+
+A phone gets modules two ways, and which one applies to yours is decided by the
+variants your package ships (§4.3), not by anything you configure.
+
+| | who runs it | when it arrives | what your package needs |
+|---|---|---|---|
+| **Bundled module** | the Native container, in the app's own process | build time, inside the app image | `ios-arm64` / `ios-sim-arm64` / `android-arm64` — `nix build .#packages.<key>.bare` (or `.view` for a `ui_qml` app) |
+| **Downloaded module** | the Web container, one webview each | runtime, from the catalog | `web` — `nix build .#web` |
+
+Neither store permits the desktop mechanism — a subprocess per module, native
+code fetched after install — so native modules on a Store shell are fixed at
+build time. That is the whole reason the Bundled set exists.
+
+**The build is an installer that runs early.** It takes a list of app names and
+a catalog, and runs the steps `lgpm install` would run:
+
+```
+name list  ->  closure  ->  fetch  ->  verify  ->  extract  ->  embed
+```
+
+From the workspace (`logos-workspace`, whose `ws` CLI drives every repo here):
+
+```bash
+# The Bundled set on its own: the named apps plus their dependency closure,
+# each package signature- and Merkle-checked, laid out for the app image.
+ws build logos-basecamp --target ios-sim-arm64 --bundle view_counter
+ws build logos-basecamp --target android-arm64 --bundle bare_counter
+
+# The same set, in an app, on a simulator. On iOS the .app itself is linked and
+# signed by Xcode, so it cannot be a nix build — this is the way in.
+ws run logos-basecamp --target ios-sim-arm64 --bundle view_counter
+```
+
+Three things about that command are worth knowing before you are on the
+receiving end of them:
+
+- **The Bundled set is data.** Adding your app to a shell is one more name on
+  `--bundle`; there is no per-module code generation and no link step, and the
+  container reads what it loaded from a manifest written by the build.
+- **A member that cannot load fails the build, by name.** The closure and the
+  variant check happen at *evaluation*, off the catalog index, so the error
+  still knows which module you asked for and how it was reached:
+
+  ```
+  logos-basecamp: the Bundled set for 'ios-sim-arm64' cannot be built.
+
+    module      counter 1.0.0
+    reached by  counter_ui -> counter
+    ships       linux-x86_64, darwin-arm64
+  ```
+
+  The alternative — discovering it as a missing file once a cross toolchain is
+  running, or as a blank screen on a phone — is what this is instead of.
+- **Every member is verified before it is unpacked**: a valid Ed25519 signature
+  by a DID the catalog declares, and the Merkle root the index pins. There is
+  no "unsigned, because it is local" path — the local catalogs the tests build
+  are signed too, precisely so the tested path is the shipped one.
+
+A Bundled module may depend only on other Bundled modules, and anything
+first-party that opens sockets is Bundled — a `web` variant reaches the network
+through Logos module APIs, never through raw sockets.
 
 ---
 
@@ -2220,7 +2419,14 @@ logoscore call <module> <method> [args]       # Call a method
 logoscore list-modules [--loaded]             # List modules
 logoscore module-info <name>                  # Show module details
 logoscore status                              # Daemon health
+logoscore watch <module> [--event <name>]     # Watch a module's events
+logoscore stats                               # Per-module pid, cpu, memory
 logoscore stop                                # Stop daemon
+
+# Assert which container everything here runs in (§6.2)
+logoscore -D -m <modules-dir> --container inproc          # every module is Bare
+LOGOSCORE_WEBHOST=<path>/bin/logoscore-webhost \
+  logoscore -D -m <modules-dir> --container web           # every module is a `web` variant
 ```
 
 ### `lgpm` -- Local Package Manager
@@ -2278,6 +2484,10 @@ What a module's flake gives you, beyond `nix build`.
 | `.#generate` | a ready-to-build source tree with every generator already run and `generated_code/` fully populated. Build it from `nix develop` without re-running a generator — and read it when you want to know what your wrapper actually looks like |
 | `.#include` | the generated SDK headers |
 | `.#headers-qt` / `.#headers-lp` | dependency wrappers, Qt-typed and Qt-free respectively |
+| `.#bare` | the **Bare module**: the module-impl C ABI exported, `lp_*` undefined, no Qt. `interface: cdylib` and core `interface: universal` only |
+| `.#web` | the `web` **variant**: the same module compiled to WebAssembly with a loader page, for the Web container |
+| `.#packages.aarch64-ios.bare` / `.aarch64-ios-simulator.bare` / `.aarch64-android.bare` | the Bare module cross-built for a phone — an embedded framework on iOS, a `lib*.so` on Android |
+| `.#packages.aarch64-ios.view` (`ui_qml`) | the view module as an embedded framework; the one shape with no Bare form |
 | `.#lgx` / `.#lgx-portable` | the signed `.lgx` package, dev and portable variants |
 | `.#install` / `.#install-portable` | build, bundle and install via `lgpm` in one step |
 | `.#unit-tests` | added automatically when `tests/CMakeLists.txt` exists; also a `check` |
