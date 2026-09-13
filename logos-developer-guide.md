@@ -2480,10 +2480,12 @@ is missing is only the barrier:
 logos_rust_sdk::storage::commit(dir)?;   // where the native code already fsyncs
 ```
 
-That is how `logos-evm-keystore-module` adopts it: one function, `atomic::barrier`,
-that every published write and every removal in the module ends at. Its native
-behaviour is unchanged line for line, and its writes survive a page reload in the
-`web` variant.
+`logos-evm-keystore-module` is the worked example of the first shape: its vault
+directory *is* a `FileStorage`, `local_dir()` is what the path-based half of
+`eth_keystore` is pointed at, and every mutating method — creating an account,
+importing one, and deleting one, because a delete is a write — ends at
+`commit()`. Its native behaviour is unchanged line for line, and its vaults
+survive a page reload in the `web` variant.
 
 Two more facts a module may log: `storage::commit_required()` (false natively,
 true on emscripten) and `storage::backend_name()`.
