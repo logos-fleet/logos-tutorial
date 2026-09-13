@@ -56,6 +56,7 @@ A comprehensive guide to creating, building, testing, packaging, and distributin
   - [9.4 Platform-keyed metadata](#94-platform-keyed-metadata)
   - [9.5 Finishing before teardown](#95-finishing-before-teardown)
   - [9.6 Persistence: one code path native and `web`](#96-persistence-one-code-path-native-and-web)
+  - [9.7 A `web` variant calling another module](#97-a-web-variant-calling-another-module)
 - [Reference: Repository Map](#reference-repository-map)
 - [Reference: CLI Tools Summary](#reference-cli-tools-summary)
   - [`lm` -- Module Inspector](#lm----module-inspector)
@@ -2572,6 +2573,105 @@ is a second launch. Arguments are **strings unless they say otherwise** --
 `int:42`, `bool:true`, `json:{"chainId":1}` -- because a type inferred from the
 spelling makes a well-formed hex address into a number, and every address-taking
 method then answers `null`.
+
+---
+
+### 9.7 A `web` variant calling another module
+
+A module in a `web` variant reaches its dependencies through **one door, and it
+is asynchronous**. That is not a gap waiting to be filled: it is what the target
+allows.
+
+A native module calls another one through generated typed clients:
+
+```cpp
+QString chains = modules().wallet_backend_module.get_chains();   // native only
+```
+
+Every one of those is **synchronous** -- the call blocks until the reply comes
+back. A wasm image is single-threaded and is built without ASYNCIFY (ADR 0004),
+and its replies arrive as **messages on the page's event loop**. A call that
+blocked waiting for one would deadlock the very loop that was going to deliver
+it. So `modules()` is not available in a `web` variant, and a backend written
+against it does not link there.
+
+What is available, in a `type: ui_qml` module's view-backend image, is:
+
+```cpp
+#include "logos_web_module_call.h"       // put on the include path by the wasm build
+
+logos::web::callModuleAsync(
+    QStringLiteral("eth_rpc_module"), QStringLiteral("get_balance"),
+    QJsonArray{ chainId, address },
+    [this](const logos::web::ModuleCallResult& res) {
+        if (!res.ok) { setStatusText(res.error); return; }
+        setBalancesJson(res.value.toString());
+    });
+
+logos::web::canCallModules();            // false until the page binds the bridge
+```
+
+and, from the module's QML, the same door under its older name:
+
+```qml
+logos.callModuleAsync("eth_rpc_module", "get_balance", [chainId, address],
+                      function (payload) { /* JSON.parse(payload) */ })
+```
+
+Four things are worth knowing about it.
+
+**It is the same door the container already opened.** The call becomes a
+logos-protocol Call on the web transport, the page relays it, and on the native
+side the container answers it with the module's **own** `LogosAPI`. So a page
+calling a native module is authorized by `capability_module` exactly as a native
+caller is -- the container grants nothing of its own, and the image holds no
+other module's credentials.
+
+**The channel is not open at construction.** The host builds the backend in
+`main()`, before the page has bound the container's bridge, and a `web` variant
+has no `onContextReady`. A backend that wants to fetch something at startup
+waits for `canCallModules()` and then asks once:
+
+```cpp
+m_startup.setInterval(100);
+connect(&m_startup, &QTimer::timeout, this, [this] {
+    if (!logos::web::canCallModules()) return;     // ...with a deadline
+    m_startup.stop();
+    refreshAccounts();
+});
+m_startup.start();
+```
+
+**A `.rep` SLOT that returns a value cannot return the answer.** The slot is
+synchronous on the source's side of the replica and the door is not, so what a
+caller gets back is that the ask was *taken*; the answer lands in a `PROP` the
+view is bound to. Design the contract so the interesting state is a PROP.
+
+**The module the call names has to be loaded.** The container resolves a name
+against what the core has, not against what could be installed -- so a Bundled
+`eth_rpc_module` answers and an uninstalled one is a `METHOD_FAILED` naming
+itself.
+
+Declaring the variant is one key in `metadata.json`, and it names the backend
+**separately from the plugin** because the two are rarely the same class:
+
+```json
+"web": {
+  "view_backend": {
+    "class":   "WalletUiWebBackend",
+    "header":  "src/wallet_ui_web_backend.h",
+    "sources": ["src/wallet_ui_web_backend.cpp"]
+  }
+}
+```
+
+`logos-evm-wallet-ui` is the worked example: the same `.rep` and the same QML as
+the desktop plugin, a backend of its own, accounts out of `keystore_module` and
+balances out of the Bundled `eth_rpc_module`, one `eth_getBalance` per chain
+fanned out over the door. Everything its desktop coordinator owns -- sends, the
+market, history -- **refuses by name** in the `web` variant rather than
+returning a plausible empty value, so a user is told the variant cannot do it
+and a developer is told which module is missing.
 
 ---
 
