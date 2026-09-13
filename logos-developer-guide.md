@@ -55,6 +55,7 @@ A comprehensive guide to creating, building, testing, packaging, and distributin
   - [9.3 Exposing OpenMetrics / Prometheus Metrics](#93-exposing-openmetrics--prometheus-metrics)
   - [9.4 Platform-keyed metadata](#94-platform-keyed-metadata)
   - [9.5 Finishing before teardown](#95-finishing-before-teardown)
+  - [9.6 Persistence: one code path native and `web`](#96-persistence-one-code-path-native-and-web)
 - [Reference: Repository Map](#reference-repository-map)
 - [Reference: CLI Tools Summary](#reference-cli-tools-summary)
   - [`lm` -- Module Inspector](#lm----module-inspector)
@@ -2385,6 +2386,138 @@ and is torn down anyway.
 > stdout and stderr *before* it sends the stop signal, so anything you print during
 > teardown is never relayed — and a silent probe looks exactly like a hook that
 > never fired. Write to a file instead.
+
+---
+
+### 9.6 Persistence: one code path native and `web`
+
+The host stamps a per-instance data directory onto every module before the first
+dispatch — `instancePersistencePath()` in C++, `ctx.instance_persistence_path` in
+Rust. Writing into it with the ordinary language runtime is the whole story on a
+desktop or a phone's Native container.
+
+**It is not the whole story in a `web` variant, and the way it fails is the
+problem.** A `web` variant runs as a Wasm host inside a webview, and an
+emscripten image *has* a filesystem. So every write succeeds, reads back
+correctly for the life of the page, and is gone on the next load — because the
+default filesystem is the image's own linear memory. Nothing raises an error,
+and nothing in the module can tell the difference.
+
+What closes the gap is one operation the plain filesystem does not have.
+
+#### The contract
+
+> **`commit()` is the durability barrier.** Data written since the last commit
+> is visible to this image immediately and is **not** guaranteed to outlive it.
+> `commit()` hands it to the durable medium.
+
+| | Natively | In a Wasm host |
+|---|---|---|
+| Where the data lives | the host's filesystem | a mount the container populated from the browser's IndexedDB before the module started serving |
+| What `commit()` does | `fsync` — the bytes are on disk when it returns | starts the write-back to IndexedDB |
+| When `Ok` means durable | immediately | in the next turn of the browser's event loop |
+| A failed `commit()` | reported by that call | reported by the **next** call |
+
+The asymmetry in the last two rows is not a design choice: `FS.syncfs` completes
+on the browser's event loop and the image is built without Asyncify (the Web
+container is single-threaded and nothing in it may block on a promise). So the
+barrier hands over and returns. A write-back that failed is raised by the next
+`commit()` — reported late, never dropped.
+
+**Where there is nothing durable to mount** — a plain `node` run, an embedded
+webview with storage disabled — the module still runs and its persistence path
+still works for the life of the page. `commit()` returns an error saying so.
+That is deliberate: a module that knows it cannot persist can tell the user, and
+one that is simply denied a filesystem cannot even run.
+
+#### From Rust
+
+`logos_rust_sdk::storage` is the abstraction. Two shapes, and which one you want
+depends on whether your core has an on-disk layout of its own.
+
+**A key/value store**, for a core whose state is a set of documents:
+
+```rust
+use logos_rust_sdk::storage::{FileStorage, Storage};
+
+fn on_context_ready(&mut self, ctx: &RustModuleContext) {
+    let root = std::path::Path::new(&ctx.instance_persistence_path).join("vaults");
+    self.store = Some(FileStorage::open(root).expect("no persistence path"));
+}
+
+fn save(&mut self, name: &str, bytes: &[u8]) -> Result<(), StorageError> {
+    let store = self.store.as_ref().unwrap();
+    store.write(name, bytes)?;   // atomic replace
+    store.commit()               // the barrier
+}
+```
+
+| Operation | Contract |
+|-----------|----------|
+| `read(key)` | The bytes, or `StorageError::NotFound` |
+| `write(key, bytes)` | Atomic replace — never a truncated value, even after a crash |
+| `remove(key)` | `Ok(false)` when absent; removing twice is not an error |
+| `exists(key)` | A question, so an invalid key is *absent* rather than an error |
+| `list()` | Every key, sorted; nothing the store did not write |
+| `commit()` | The durability barrier |
+| `local_dir()` | The backing directory, when there is one |
+
+A **key** is a flat, non-empty name — no `/`, no `\`, no `.` or `..` component.
+Not a path. A store is one flat namespace because OPFS and IndexedDB are, the
+filesystem is not, and the intersection is what a module may rely on. A key that
+would escape the store is refused before anything is opened.
+
+`local_dir()` is the escape hatch for a dependency that owns its own write and
+only takes a path — `eth_keystore::encrypt_key` is the example. It is `None` for
+`MemoryStorage`, which is why such a dependency cannot be pointed at one.
+
+**Just the barrier**, for a core that already has its own on-disk layout —
+nested directories, unix modes, its own staging discipline. It should not have
+to flatten itself into a key/value store to become correct in a webview; what it
+is missing is only the barrier:
+
+```rust
+logos_rust_sdk::storage::commit(dir)?;   // where the native code already fsyncs
+```
+
+That is how `logos-evm-keystore-module` adopts it: one function, `atomic::barrier`,
+that every published write and every removal in the module ends at. Its native
+behaviour is unchanged line for line, and its writes survive a page reload in the
+`web` variant.
+
+Two more facts a module may log: `storage::commit_required()` (false natively,
+true on emscripten) and `storage::backend_name()`.
+
+#### From C++
+
+The barrier is a plain export of the Wasm host, so a C++ core reaches it the same
+way — guarded, because on every other target a native write is already durable and
+the symbol does not exist:
+
+```cpp
+#ifdef __EMSCRIPTEN__
+extern "C" int logos_storage_commit(void);   // 0 ok, -1 no durable store, >0 previous failure
+#endif
+
+bool MyImpl::save(const std::string& text)
+{
+    const std::string& root = instancePersistencePath();
+    if (root.empty()) return false;
+    { std::ofstream out(root + "/note.txt", std::ios::binary | std::ios::trunc); out << text; }
+#ifdef __EMSCRIPTEN__
+    if (logos_storage_commit() != 0) return false;
+#endif
+    return true;
+}
+```
+
+#### Testing it
+
+The property is *"a write survives the image"*, and one image cannot show that.
+Drive it across two: write and commit in the first, read it back in a second —
+which is exactly what a page reload is to a module's store. The builder's
+`web-variant` check does this with the `bare-counter` fixture, using a real host
+directory in place of IndexedDB so it needs no browser.
 
 ---
 
