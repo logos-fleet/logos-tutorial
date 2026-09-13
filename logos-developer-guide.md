@@ -2537,6 +2537,42 @@ place of IndexedDB so neither needs a browser. `logos-evm-keystore-module`'s own
 encrypts a key, and image B lists it, unlocks it with the password, signs with
 it, and finds a deleted one still deleted.
 
+#### On a phone: one origin per module, and how to ask
+
+A browser keys IndexedDB by **origin**, so where a `web` module's store ends up
+is decided by the URL its page was served on. The desktop containers give each
+module its own named, persistent profile in its own directory; the phone
+containers have no profile to name (iOS shares one `WKWebsiteDataStore`, Android
+one WebView data directory), so they serve each module on an origin of its own
+-- the module's name as the first host label:
+
+    logos://keystore-module.module/index.html        (iOS)
+    https://keystore-module.appassets.androidplatform.net/index.html   (Android)
+
+Same property, three mechanisms: two `web` modules are two pages, two origins
+and two stores. Nothing in a module has to know -- a module asks the host for
+its persistence path and calls `commit()`, exactly as it does on a desktop.
+
+Asking a headless module anything on a device needs a driver, because a `core`
+module has no UI and a phone has no second process to call it from. Basecamp's
+Shell takes calls on its own command line -- the on-device `logoscore call`:
+
+```bash
+xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
+  --call 'keystore_module.new_account(hunter2)'
+# ...then terminate the app, launch it again, and ask:
+xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
+  --call 'keystore_module.list_accounts' \
+  --call 'keystore_module.unlock(0x8ad0Fcf7...,hunter2)'
+```
+
+Two launches, not two calls in one: a `web` module's store lives in its page and
+the page dies with the process, so the only honest way to ask "did it survive"
+is a second launch. Arguments are **strings unless they say otherwise** --
+`int:42`, `bool:true`, `json:{"chainId":1}` -- because a type inferred from the
+spelling makes a well-formed hex address into a number, and every address-taking
+method then answers `null`.
+
 ---
 
 ## Reference: Repository Map
