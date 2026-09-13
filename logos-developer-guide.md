@@ -483,6 +483,18 @@ Nothing in the Web container is wasm-aware. It opens `main` in a webview and
 relays the web transport across its bridge exactly as it does for a page written
 in JavaScript — which is why the same variant runs behind a `WKWebView`.
 
+**A Rust core gets one too.** A `codegen.rust` module's whole module-impl C ABI
+lives inside its crate, so the builder compiles that crate for
+`wasm32-unknown-emscripten` and links the archive into the same image. Nothing
+in `metadata.json` asks for it — a Rust module has a `web` output for the same
+reason a C++ one does. The one thing worth knowing is that the image gets a
+**4 MB stack** rather than emscripten's 64 KB default, because Rust crates are
+written against the 8 MB a native main thread has: `k256`'s ECDSA signing
+overflows 64 KB, and before the stack was raised the keystore's `web` variant
+created a key, stored it, reloaded it across a page — and died on the first
+signature with `RuntimeError: memory access out of bounds`. If you exhaust even
+4 MB, the abort now says `stack overflow` and names the limits.
+
 Run it on the desktop with the Web container:
 
 ```bash
@@ -2518,8 +2530,12 @@ bool MyImpl::save(const std::string& text)
 The property is *"a write survives the image"*, and one image cannot show that.
 Drive it across two: write and commit in the first, read it back in a second —
 which is exactly what a page reload is to a module's store. The builder's
-`web-variant` check does this with the `bare-counter` fixture, using a real host
-directory in place of IndexedDB so it needs no browser.
+`web-variant` check does this with the `bare-counter` fixture and
+`web-rust-variant` with the `bare-rust` one, using a real host directory in
+place of IndexedDB so neither needs a browser. `logos-evm-keystore-module`'s own
+`web-variant` check is the same shape over the real thing: image A creates and
+encrypts a key, and image B lists it, unlocks it with the password, signs with
+it, and finds a deleted one still deleted.
 
 ---
 
