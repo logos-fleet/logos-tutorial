@@ -1366,6 +1366,55 @@ until ./logos/bin/logoscore status >/dev/null 2>&1; do sleep 0.2; done
 > `-l/--load-modules` autoload flag — the daemon starts clean and modules are
 > loaded with `load-module`. `-m`/`--persistence-path` configure daemon startup (`-D`).
 
+#### Argument typing — a number means a DECIMAL number
+
+`call` takes positional arguments, and a command line carries no types, so each
+one is turned into a JSON value by the first rule that matches:
+
+| Argument form | Becomes | Example |
+| ------------- | ------- | ------- |
+| `json:<value>` | the value parsed as JSON (list / map / nested) | `json:[1,2,3]`, `json:{"k":"v"}` |
+| `json:@<file>` | the file's contents parsed as JSON | `json:@payload.json` |
+| `str:<text>` | `<text>` verbatim as a string — no parsing, no coercion | `str:42` → `"42"` |
+| `@<file>` | the file's raw contents as a string | `@config.json` |
+| `true` / `false` | a boolean | `true` |
+| a whole DECIMAL number | an integer | `42`, `-7` |
+| a DECIMAL number with a fraction or exponent | a double | `3.14`, `1e5` |
+| anything else | a string | `hello`, `0x8ad0Fcf7…`, `inf` |
+
+**`0x` + hex is a string**, and so are `inf` and `nan`. Those three are the
+forms the C library's `strtod` accepts that this table does not, and accepting
+them was a silent defect: every EVM address, transaction hash, private key and
+signature is `0x` + hex, so
+
+```bash
+logoscore call keystore_module has_address 0x8ad0Fcf71D6FBD060BAfd45f5155b1e52d3591C5
+```
+
+inferred the double `7.9250088148318908e+47` (a well-formed hex float, by C99's
+grammar), the module's `tstr` parameter never saw the address, and the call
+answered `{"result": null, "status": "ok"}` — exit code 0, nothing logged
+anywhere. `0xzz` is not valid hex and was a string all along, which is what made
+two spellings of the same argument behave differently.
+
+So a hex argument needs no escape. `str:` is for the opposite case — keeping a
+decimal-looking string a string.
+
+An argument the method's declared parameter cannot take is now an **error**
+rather than a `null`: `call` asks the module for its own interface when a call
+returns null, and reports
+
+```
+Error: Call to keystore_module.has_address failed
+       (argument_mismatch: expected string at arg0, got number).
+```
+
+with exit code 4.
+
+> Basecamp's on-device Shell driver (`--call`, §9.6) uses a different and
+> stricter convention for the same reason: there, arguments are **strings unless
+> they say otherwise** (`int:42`, `bool:true`, `json:{...}`).
+
 **Daemon startup flags:**
 
 | Flag                               | Description                                          |
