@@ -2609,12 +2609,23 @@ Shell takes calls on its own command line -- the on-device `logoscore call`:
 
 ```bash
 xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
-  --call 'keystore_module.new_account(hunter2)'
+  --call 'wallet_ui.createAccount(hunter2,main)'
 # ...then terminate the app, launch it again, and ask:
 xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
-  --call 'keystore_module.list_accounts' \
-  --call 'keystore_module.unlock(0x8ad0Fcf7...,hunter2)'
+  --call 'keystore_module.list_accounts'
 ```
+
+**The driver drives the module that holds the role, not the keystore.** Creating
+an account is Tier D in `keystore_module`: it is admitted to the configured
+CUSTODIAN and to nobody else, and a `--call` reaches the module as the HOST
+ANCHOR -- one undifferentiated credential covering the shells, `core_service` and
+every relayed CLI token, which no tier admits. So
+`keystore_module.create_unrelated_account` would answer `not authorized` here
+however it was spelled. `wallet_ui` is a plainly named module, it names itself a
+custodian before it mutates, and driving it is how the shell reaches a gated
+method at all. Reading is unaffected: `list_accounts`, `get_labels` and
+`list_groups` are ungated on purpose, so the second launch asks the keystore
+directly.
 
 Two launches, not two calls in one: a `web` module's store lives in its page and
 the page dies with the process, so the only honest way to ask "did it survive"
