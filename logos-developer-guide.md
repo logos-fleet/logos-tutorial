@@ -2609,23 +2609,31 @@ Shell takes calls on its own command line -- the on-device `logoscore call`:
 
 ```bash
 xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
-  --call 'wallet_ui.createAccount(hunter2,main)'
-# ...then terminate the app, launch it again, and ask:
-xcrun simctl launch --console-pty "$UDID" co.logos.basecamp.shell \
   --call 'keystore_module.list_accounts'
+# ...then terminate the app, launch it again and ask the same thing.
 ```
 
-**The driver drives the module that holds the role, not the keystore.** Creating
-an account is Tier D in `keystore_module`: it is admitted to the configured
-CUSTODIAN and to nobody else, and a `--call` reaches the module as the HOST
-ANCHOR -- one undifferentiated credential covering the shells, `core_service` and
-every relayed CLI token, which no tier admits. So
-`keystore_module.create_unrelated_account` would answer `not authorized` here
-however it was spelled. `wallet_ui` is a plainly named module, it names itself a
-custodian before it mutates, and driving it is how the shell reaches a gated
-method at all. Reading is unaffected: `list_accounts`, `get_labels` and
-`list_groups` are ungated on purpose, so the second launch asks the keystore
-directly.
+**Reading, not writing -- and the driver cannot do the writing.** `list_accounts`,
+`get_labels` and `list_groups` are UNGATED on purpose, so a `--call` gets a real
+answer out of a keystore that has one. Everything that MUTATES it is Tier D and
+admits the configured CUSTODIAN alone, while a `--call` reaches a module as the
+HOST ANCHOR -- one undifferentiated credential covering the shells,
+`core_service` and every relayed CLI token, which no tier admits. So
+`keystore_module.create_unrelated_account` answers `not authorized` here however
+it is spelled.
+
+Driving the wallet instead does not get round it, and the reason is worth knowing:
+a `ui_qml` module's `.rep` SLOTs are its VIEW's contract, published to the page's
+QML, not a LogosAPI module surface. Measured on an iPad Air 13-inch simulator,
+with the page already up and its contract answered:
+
+```
+[shell] CALL OK wallet_ui.createAccount(hunter2,main) -> (no value)
+```
+
+-- accepted, answered with nothing, and not one line on the page's console. The
+account it would have made is made by pressing **New account** in the wallet, and
+the two launches above then show the store survived.
 
 Two launches, not two calls in one: a `web` module's store lives in its page and
 the page dies with the process, so the only honest way to ask "did it survive"
