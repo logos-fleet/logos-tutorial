@@ -434,10 +434,11 @@ Same method, same daemon, same second — and the value changed only for the cal
 
 **You are not checking a claim.** An unauthorized call never reaches your handler at all — the identity you read is a byproduct of the authorization that already happened, which is why there is nothing for a caller to spoof.
 
-### Two ways to read `unknown` forever
+### Three ways to read the wrong caller forever
 
 1. **A legacy `Q_INVOKABLE` Qt plugin.** The handler body runs in the plugin image with no generated glue, so nothing pushes the identity in. `interface: "universal"` and `"cdylib"` modules — everything in this tutorial series — are fine.
 2. **A mispinned build.** A plugin generated below logos-protocol 0.6 has no caller machinery at all: every call reads `unknown` while the module still compiles, links and loads. Nothing warns you, which is exactly why a refusal should name what it saw.
+3. **A `web` variant on a host below logos-protocol 0.10.4.** Worse than `unknown`, and the reason it is called out: the module reads its OWN name for every caller. A page is reached over the web transport and the container presents the relayed module's own root credential — the only one it holds — so a host that derived the caller from that token answered the module itself. From 0.10.4 the container names the caller as a field on the call and the module reads the real one; below it, a name-gated `web` module admits nobody.
 
 In Rust the same surface is `logos_rust_sdk::current_caller()`, returning
 `Unknown | HostAnchor | Module{name, instance} | Derived{parent, leaf} | Operator{name}`,

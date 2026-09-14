@@ -1969,10 +1969,15 @@ arm you did not think about lands on the refusal path.
 **The identity is valid for one dispatch, on the dispatching thread.** A handler
 that needs it later must copy it at the top.
 
-Two builds read `Unknown` forever, quietly. A **legacy `Q_INVOKABLE` Qt plugin**
-has no generated glue, so nothing pushes the identity in. And a module generated
-below **logos-protocol 0.6** has no caller machinery at all, yet still compiles,
-links and loads. Neither warns you — which is why a refusal should name what it
+Three builds read the wrong caller forever, quietly. A **legacy `Q_INVOKABLE` Qt
+plugin** has no generated glue, so nothing pushes the identity in. A module
+generated below **logos-protocol 0.6** has no caller machinery at all, yet still
+compiles, links and loads. And a **`web` variant on a host below logos-protocol
+0.10.4** reads its OWN name rather than `Unknown` — a page is reached over the
+web transport and the container presents the relayed module's own root
+credential, the only one it holds, so a host that derived the caller from that
+token answered the module itself; a name-gated `web` module therefore admitted
+nobody. None of the three warns you — which is why a refusal should name what it
 saw.
 
 In Rust the surface is `logos_rust_sdk::current_caller()`, returning
