@@ -2731,6 +2731,13 @@ presents it on every frame to that target. A target it is granted no token for
 is **refused, not forwarded** — the failure arrives in your callback and nothing
 goes on the wire.
 
+**Drive it without a browser.** The image's one message port is
+`Module.logosOut`, so a node harness can BE the far side: it reads the frames the
+image sends, answers the handshake, answers the call, and asserts what the module
+made of the reply. `logos-evm-uniswap-module`'s `checks.<system>.web-variant` is
+the worked example over a real module — handshake, one Multicall3 `eth_call`, the
+decoded price, and the refusal when the handshake grants nothing.
+
 #### A `type: ui_qml` module's view-backend image
 
 What is available there is a Qt-shaped door over the same channel:
@@ -2843,16 +2850,29 @@ while `eth_rpc_module`, `uniswap_module` and `token_list_module` are native
 Bundled Bare modules in the app image. That is not an accident of who ported
 what, and the three native ones are native for **two different reasons**.
 
-`uniswap_module` is native because of a **pin**, and that is the weaker of the
-two reasons: nothing in the module stands in the way any more. Its work is one
-call to another module, and that call site is the generated **async** client
-([9.7](#97-a-web-variant-calling-another-module)) -- so the module is the worked
+`uniswap_module` is native on a phone because of **how it is delivered**, and
+that is the weaker of the two reasons: the module itself is not stopped from
+being a `web` variant, and today it is not -- it has a `web` output and a check
+that drives one. Its work is one call to another module, and that call site is
+the generated **async** client
+([9.7](#97-a-web-variant-calling-another-module)), so the module is the worked
 example of the shape that section describes from the outside. A method that
 fires an async call cannot return its answer, so each of its three waiting
 methods has a twin that does not wait: `start_get_prices` answers a job id at
-once, and `take_result` collects the prices when they land. It gets a `web`
-output the day the workspace pins a `logos-protocol` whose wasm subset carries
-the outbound door, with no edit in its flake.
+once, and `take_result` collects the prices when they land. The waiting twins
+are still published and still work on a native host; in the image they refuse,
+naming the methods that do not wait.
+
+Its `checks.<system>.web-variant` is worth reading if you are porting a module
+with a dependency, because it is the whole outbound path asserted from the far
+side of the wire: node holds the image's one message port, answers the
+`capability_module.requestModule` handshake, receives the Multicall3 `eth_call`
+that follows -- carrying the token it just granted -- and replies with an
+`aggregate3` return the module decodes into a price. Granting nothing instead
+leaves `eth_rpc_module` undialled and the job carrying the refusal, which is the
+half a link cannot establish. A phone still loads the native Bare build, because
+a Bundled set is resolved out of the mobile catalog and that is what the entry
+names -- not because the image would not run.
 
 `eth_rpc_module` and `token_list_module` **declare** `"platform": true` instead,
 and that is the stronger statement of the two: both open their own sockets
