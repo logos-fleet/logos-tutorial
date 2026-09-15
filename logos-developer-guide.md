@@ -497,13 +497,15 @@ carry the intent. `eth_rpc_module`, `token_list_module`, `libp2p_module` and
 `delivery_module` declare it.
 
 And a module with `dependencies` gets a `web` variant only once the pinned
-`logos-protocol` wasm subset can make an **outbound call**. A wasm image serves
-calls today; `lp_invoke` is not in the subset, so a module that calls a
-dependency would fail at `wasm-ld` with an undefined symbol and no mention of
-why. That gate is keyed on the pin (`logos-protocol-wasm`'s `hasOutboundDoor`),
-not on the module, so it lifts on a pin bump with no edit in any flake. A module
-that writes `"web": { "dependencies": [] }` is saying its image is a leaf and
-calls nobody, and builds today.
+`logos-protocol` wasm subset can make an **outbound call** — otherwise a module
+that called a dependency would fail at `wasm-ld` with an undefined symbol and no
+mention of why. That gate is keyed on the pin (`logos-protocol-wasm`'s
+`hasOutboundDoor`), not on the module, so it lifts on a pin bump with no edit in
+any flake. A pin that carries the door defines `lp_client_create`,
+`lp_client_destroy` and `lp_invoke_async` for wasm32, and the module's generated
+**async** clients work unchanged — see [9.7](#97-a-web-variant-calling-another-module).
+A module that writes `"web": { "dependencies": [] }` is saying its image is a
+leaf and calls nobody, and needs no door at all.
 
 In both cases `nix build .#web` reports that the flake has no such attribute —
 the output is absent, so a shell that enumerates variants is one entry short
@@ -2690,10 +2692,48 @@ Every one of those is **synchronous** -- the call blocks until the reply comes
 back. A wasm image is single-threaded and is built without ASYNCIFY (ADR 0004),
 and its replies arrive as **messages on the page's event loop**. A call that
 blocked waiting for one would deadlock the very loop that was going to deliver
-it. So `modules()` is not available in a `web` variant, and a backend written
-against it does not link there.
+it. So the SYNCHRONOUS spelling is not available in a `web` variant, in either
+kind of module, and a source written against it does not build there.
 
-What is available, in a `type: ui_qml` module's view-backend image, is:
+#### A `codegen.rust` core module: the `_async` twin of every method
+
+`modules()` IS available in a core module's wasm image, and every generated
+method has an async twin that works there unchanged:
+
+```rust
+// in a `web` build this does not COMPILE -- `increment` is gated out
+let total = modules().counter_module.increment(5)?;
+
+// this is the one that exists
+modules().counter_module.increment_async(5, |result| {
+    match result {
+        Ok(total) => { /* ... */ }
+        Err(e)    => { /* ... */ }
+    }
+});
+```
+
+The error you get for the first form names your own call
+(``no method named `increment` found``), because `logos-rust-sdk` gates every
+synchronous path on `cfg(not(target_os = "emscripten"))` and `lidl-gen` emits
+the sync methods under the same gate. A **universal C++** module hears the same
+thing one step later, from `wasm-ld`: `undefined symbol: lp_invoke`.
+
+The callback runs later, on the image's event loop, so a method that fires a
+call cannot return its answer — park it and expose a second method (or a PROP,
+for a view) that reads it.
+
+**The image asks for its credential on the first call.** It holds none at
+startup: the core pushes a module its own token and its callers', never an
+outbound one. So the door runs the same `capability_module.requestModule`
+handshake a native client runs transparently, remembers what it is granted, and
+presents it on every frame to that target. A target it is granted no token for
+is **refused, not forwarded** — the failure arrives in your callback and nothing
+goes on the wire.
+
+#### A `type: ui_qml` module's view-backend image
+
+What is available there is a Qt-shaped door over the same channel:
 
 ```cpp
 #include "logos_web_module_call.h"       // put on the include path by the wasm build
