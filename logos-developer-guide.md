@@ -2739,12 +2739,38 @@ Declaring the variant is one key in `metadata.json`, and it names the backend
 ```
 
 `logos-evm-wallet-ui` is the worked example: the same `.rep` and the same QML as
-the desktop plugin, a backend of its own, accounts out of `keystore_module` and
-balances out of the Bundled `eth_rpc_module`, one `eth_getBalance` per chain
-fanned out over the door. Everything its desktop coordinator owns -- sends, the
-market, history -- **refuses by name** in the `web` variant rather than
-returning a plausible empty value, so a user is told the variant cannot do it
-and a developer is told which module is missing.
+the desktop plugin, a backend of its own, accounts out of `keystore_module`,
+balances out of the Bundled `eth_rpc_module` (one `eth_getBalance` per chain
+fanned out over the door) and prices out of the Bundled `uniswap_module`. What
+its desktop coordinator still owns alone -- sends, fee estimation, history, token
+lists -- **refuses by name** in the `web` variant rather than returning a
+plausible empty value, so a user is told the variant cannot do it and a
+developer is told which module is missing.
+
+**A `web` variant names its own dependencies.** The core resolves a module's
+declared dependencies before loading it, so a variant that inherited the desktop
+build's list would be refused for modules its image never calls. `web.dependencies`
+is that list, and it grows by one each time a module the backend calls gains a
+mobile build:
+
+```json
+"web": {
+  "dependencies": ["eth_rpc_module", "keystore_module", "uniswap_module"],
+  "view_backend": { "...": "..." }
+}
+```
+
+**The module a `web` variant calls need not itself be a `web` variant.** Both
+kinds are reached the same way -- by name, over the door -- and which one answers
+is the container's business: `keystore_module` is a `web` variant on a phone
+while `eth_rpc_module` and `uniswap_module` are native Bundled Bare modules in
+the app image. That is not an accident of who ported what. A module whose work is
+one *synchronous* call to another module cannot be a wasm image at all: a Worker
+is a single event loop with no ASYNCIFY, so there is nothing for a blocking
+outbound call to be answered by, and logos-protocol's wasm subset therefore links
+no `lp_client_create` -- such a module fails to link rather than failing at
+runtime. `uniswap_module` is exactly that shape, which is why it crosses as
+native machine code and is called from the page rather than compiled into one.
 
 ---
 
