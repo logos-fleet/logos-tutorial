@@ -2843,11 +2843,16 @@ while `eth_rpc_module`, `uniswap_module` and `token_list_module` are native
 Bundled Bare modules in the app image. That is not an accident of who ported
 what, and the three native ones are native for **two different reasons**.
 
-`uniswap_module` cannot be a wasm image: a module whose work is one *synchronous*
-call to another module has nothing to be answered by, because a Worker is a
-single event loop with no ASYNCIFY, and logos-protocol's wasm subset therefore
-links no `lp_client_create` -- such a module fails to link rather than failing at
-runtime.
+`uniswap_module` is native because of a **pin**, and that is the weaker of the
+two reasons: nothing in the module stands in the way any more. Its work is one
+call to another module, and that call site is the generated **async** client
+([9.7](#97-a-web-variant-calling-another-module)) -- so the module is the worked
+example of the shape that section describes from the outside. A method that
+fires an async call cannot return its answer, so each of its three waiting
+methods has a twin that does not wait: `start_get_prices` answers a job id at
+once, and `take_result` collects the prices when they land. It gets a `web`
+output the day the workspace pins a `logos-protocol` whose wasm subset carries
+the outbound door, with no edit in its flake.
 
 `eth_rpc_module` and `token_list_module` **declare** `"platform": true` instead,
 and that is the stronger statement of the two: both open their own sockets
