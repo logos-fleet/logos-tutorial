@@ -2767,11 +2767,12 @@ Declaring the variant is one key in `metadata.json`, and it names the backend
 the desktop plugin, a backend of its own, accounts and keys out of
 `keystore_module` (creating an account and importing a seed phrase are both its
 methods, asked for directly), balances out of the Bundled `eth_rpc_module` (one
-`eth_getBalance` per chain fanned out over the door) and prices out of the
-Bundled `uniswap_module`. What its desktop coordinator still owns alone -- sends,
-fee estimation, history, token lists -- **refuses by name** in the `web` variant
-rather than returning a plausible empty value, so a user is told the variant
-cannot do it and a developer is told which module is missing.
+`eth_getBalance` per chain fanned out over the door), prices out of the Bundled
+`uniswap_module` and token lists out of the Bundled `token_list_module`. What its
+desktop coordinator still owns alone -- sends, fee estimation, history --
+**refuses by name** in the `web` variant rather than returning a plausible empty
+value, so a user is told the variant cannot do it and a developer is told which
+module is missing.
 
 **Refuse by name only for a module that really is absent.** "X needs
 `some_module`, which has no mobile build" is a claim about the BUILD, and it
@@ -2785,11 +2786,12 @@ the same run.
 declared dependencies before loading it, so a variant that inherited the desktop
 build's list would be refused for modules its image never calls. `web.dependencies`
 is that list, and it grows by one each time a module the backend calls gains a
-mobile build:
+mobile build -- `uniswap_module` and then `token_list_module` were each added the
+day their Bare cross-build landed:
 
 ```json
 "web": {
-  "dependencies": ["eth_rpc_module", "keystore_module", "uniswap_module"],
+  "dependencies": ["eth_rpc_module", "keystore_module", "uniswap_module", "token_list_module"],
   "view_backend": { "...": "..." }
 }
 ```
@@ -2797,14 +2799,24 @@ mobile build:
 **The module a `web` variant calls need not itself be a `web` variant.** Both
 kinds are reached the same way -- by name, over the door -- and which one answers
 is the container's business: `keystore_module` is a `web` variant on a phone
-while `eth_rpc_module` and `uniswap_module` are native Bundled Bare modules in
-the app image. That is not an accident of who ported what. A module whose work is
-one *synchronous* call to another module cannot be a wasm image at all: a Worker
-is a single event loop with no ASYNCIFY, so there is nothing for a blocking
-outbound call to be answered by, and logos-protocol's wasm subset therefore links
-no `lp_client_create` -- such a module fails to link rather than failing at
-runtime. `uniswap_module` is exactly that shape, which is why it crosses as
-native machine code and is called from the page rather than compiled into one.
+while `eth_rpc_module`, `uniswap_module` and `token_list_module` are native
+Bundled Bare modules in the app image. That is not an accident of who ported
+what, and the three native ones are native for **two different reasons**.
+
+`uniswap_module` cannot be a wasm image: a module whose work is one *synchronous*
+call to another module has nothing to be answered by, because a Worker is a
+single event loop with no ASYNCIFY, and logos-protocol's wasm subset therefore
+links no `lp_client_create` -- such a module fails to link rather than failing at
+runtime.
+
+`eth_rpc_module` and `token_list_module` **declare** `"platform": true` instead,
+and that is the stronger statement of the two: both open their own sockets
+(`reqwest` with `rustls-tls` and `socks`, and a `proxyRequired` that fails closed
+rather than sending a request in the clear), which is access a webview does not
+give a page. A `fetch`-based port of either would not merely be work -- it would
+silently void the fail-closed proxy guarantee, because a page cannot force its
+own requests through SOCKS5h. So they are always Bundled, and a Downloaded module
+reaches an RPC endpoint or token metadata by *calling* them.
 
 ---
 
