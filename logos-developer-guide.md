@@ -377,7 +377,9 @@ nix build .#packages.aarch64-android.bare
 
 # The same module compiled to WebAssembly, with logos-protocol's web transport
 # linked in and a loader page around it: an LGX `web` variant that runs in a Web
-# Worker inside a webview. Same admission rule as `bare`.
+# Worker inside a webview. Same admission rule as `bare`, plus the two gates
+# below: no `platform: true`, and no dependencies until the protocol pin can
+# make an outbound call.
 nix build .#web
 
 # Enter the dev shell for manual CMake builds (see: https://nix.dev/tutorials/first-steps/dev-environment)
@@ -483,6 +485,29 @@ page survives to report it.
 Nothing in the Web container is wasm-aware. It opens `main` in a webview and
 relays the web transport across its bridge exactly as it does for a page written
 in JavaScript — which is why the same variant runs behind a `WKWebView`.
+
+**Two things switch the output off, and both are absences rather than errors.**
+
+A module that declares `"platform": true` in its `metadata.json` owns access the
+webview cannot provide — raw TCP/UDP, background execution, a secure enclave —
+so it is always part of a shell's **Bundled** set and there is no such thing as
+a `web` build of it. It is declared and never inferred: `reqwest` with the `js`
+feature is a legitimate way to fetch from wasm, so what a crate links cannot
+carry the intent. `eth_rpc_module`, `token_list_module`, `libp2p_module` and
+`delivery_module` declare it.
+
+And a module with `dependencies` gets a `web` variant only once the pinned
+`logos-protocol` wasm subset can make an **outbound call**. A wasm image serves
+calls today; `lp_invoke` is not in the subset, so a module that calls a
+dependency would fail at `wasm-ld` with an undefined symbol and no mention of
+why. That gate is keyed on the pin (`logos-protocol-wasm`'s `hasOutboundDoor`),
+not on the module, so it lifts on a pin bump with no edit in any flake. A module
+that writes `"web": { "dependencies": [] }` is saying its image is a leaf and
+calls nobody, and builds today.
+
+In both cases `nix build .#web` reports that the flake has no such attribute —
+the output is absent, so a shell that enumerates variants is one entry short
+rather than unable to evaluate.
 
 **A Rust core gets one too.** A `codegen.rust` module's whole module-impl C ABI
 lives inside its crate, so the builder compiles that crate for
