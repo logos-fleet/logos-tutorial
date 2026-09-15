@@ -2739,13 +2739,22 @@ Declaring the variant is one key in `metadata.json`, and it names the backend
 ```
 
 `logos-evm-wallet-ui` is the worked example: the same `.rep` and the same QML as
-the desktop plugin, a backend of its own, accounts out of `keystore_module`,
-balances out of the Bundled `eth_rpc_module` (one `eth_getBalance` per chain
-fanned out over the door) and prices out of the Bundled `uniswap_module`. What
-its desktop coordinator still owns alone -- sends, fee estimation, history, token
-lists -- **refuses by name** in the `web` variant rather than returning a
-plausible empty value, so a user is told the variant cannot do it and a
-developer is told which module is missing.
+the desktop plugin, a backend of its own, accounts and keys out of
+`keystore_module` (creating an account and importing a seed phrase are both its
+methods, asked for directly), balances out of the Bundled `eth_rpc_module` (one
+`eth_getBalance` per chain fanned out over the door) and prices out of the
+Bundled `uniswap_module`. What its desktop coordinator still owns alone -- sends,
+fee estimation, history, token lists -- **refuses by name** in the `web` variant
+rather than returning a plausible empty value, so a user is told the variant
+cannot do it and a developer is told which module is missing.
+
+**Refuse by name only for a module that really is absent.** "X needs
+`some_module`, which has no mobile build" is a claim about the BUILD, and it
+sends whoever reads it looking for one. A method the variant has simply not got
+to yet is a different thing and says so in its own words -- logos-workspace#147
+was the wallet refusing a mnemonic import that way while `keystore_module`,
+itself a `web` variant on the phone, was loaded and answering `list_accounts` in
+the same run.
 
 **A `web` variant names its own dependencies.** The core resolves a module's
 declared dependencies before loading it, so a variant that inherited the desktop
